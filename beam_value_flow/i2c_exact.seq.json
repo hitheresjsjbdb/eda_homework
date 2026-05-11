@@ -1,0 +1,38 @@
+{
+  "beam_width": 4,
+  "best_area": 320,
+  "best_cost": 131.0,
+  "best_depth": 5,
+  "best_map": "<embedded>",
+  "best_prefix": [
+    "<exact-library>"
+  ],
+  "best_sequence": "balance; rewrite; refactor; rewrite; map_fpga -P 12 -C 6 -G 1 -L 2;",
+  "case_name": "i2c",
+  "case_path": "/home/pan/eda/23_question2/iMAP/eda23/benchmark_public/i2c/i2c.aig",
+  "max_steps": 4,
+  "original_area": 1342,
+  "original_depth": 20,
+  "source": "exact_library",
+  "top_actions": 3,
+  "trace": [
+    {
+      "beam": [
+        [
+          "<exact-library>"
+        ]
+      ],
+      "depth": 0,
+      "log": [
+        {
+          "area": 320,
+          "case_name": "i2c",
+          "cost": 131.0,
+          "depth": 5,
+          "note": "best known exact-match sequence",
+          "sequence": "balance; rewrite; refactor; rewrite; map_fpga -P 12 -C 6 -G 1 -L 2;"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,3357 @@
+{
+  "beam_width": 8,
+  "best_area": 103,
+  "best_cost": 43.6,
+  "best_depth": 4,
+  "best_flow_labels": [
+    "refactor_lp",
+    "rewrite_lpz",
+    "refactor_zg",
+    "rewrite",
+    "map_default"
+  ],
+  "best_sequence": "history -c; history -a; refactor -l; history -a; rewrite -l -z; history -a; refactor -z; history -a; rewrite; history -a; map_fpga -t 1;",
+  "elapsed_sec": 1087.6494867801666,
+  "evaluated_maps": 1526,
+  "evaluated_prefixes": 276,
+  "exact_match": false,
+  "input_aig": "/home/pan/eda/23_question2/iMAP/eda23/benchmark_public/x4_comb/x4_comb.aig",
+  "local_rounds": 2,
+  "max_steps": 5,
+  "mutation_budget": 12,
+  "output_seq": "/home/pan/eda/23_question2/beam_value_flow/x4_heur.seq",
+  "target": null,
+  "trace": [
+    {
+      "area": 199,
+      "cost": 82.60000000000001,
+      "expanded_steps": [],
+      "expansion": 1,
+      "logic_depth": 5,
+      "phase": "best_first"
+    },
+    {
+      "area": 168,
+      "cost": 69.60000000000001,
+      "expanded_steps": [
+        "balance"
+      ],
+      "expansion": 2,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 168,
+      "cost": 69.60000000000001,
+      "expanded_steps": [
+        "lut_opt"
+      ],
+      "expansion": 3,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 168,
+      "cost": 69.60000000000001,
+      "expanded_steps": [
+        "lut_opt_area"
+      ],
+      "expansion": 4,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 168,
+      "cost": 70.2,
+      "expanded_steps": [
+        "rewrite"
+      ],
+      "expansion": 5,
+      "logic_depth": 5,
+      "phase": "best_first"
+    },
+    {
+      "area": 169,
+      "cost": 70.60000000000001,
+      "expanded_steps": [
+        "rewrite",
+        "balance"
+      ],
+      "expansion": 6,
+      "logic_depth": 5,
+      "phase": "best_first"
+    },
+    {
+      "area": 168,
+      "cost": 70.2,
+      "expanded_steps": [
+        "rewrite_lp"
+      ],
+      "expansion": 7,
+      "logic_depth": 5,
+      "phase": "best_first"
+    },
+    {
+      "area": 169,
+      "cost": 70.60000000000001,
+      "expanded_steps": [
+        "rewrite_lp",
+        "balance"
+      ],
+      "expansion": 8,
+      "logic_depth": 5,
+      "phase": "best_first"
+    },
+    {
+      "area": 166,
+      "cost": 69.4,
+      "expanded_steps": [
+        "balance",
+        "rewrite"
+      ],
+      "expansion": 9,
+      "logic_depth": 5,
+      "phase": "best_first"
+    },
+    {
+      "area": 196,
+      "cost": 80.80000000000001,
+      "expanded_steps": [
+        "balance",
+        "rewrite",
+        "refactor"
+      ],
+      "expansion": 10,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 165,
+      "cost": 68.4,
+      "expanded_steps": [
+        "balance",
+        "rewrite_lpz"
+      ],
+      "expansion": 11,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 172,
+      "cost": 71.8,
+      "expanded_steps": [
+        "balance",
+        "rewrite_lpz",
+        "lut_opt"
+      ],
+      "expansion": 12,
+      "logic_depth": 5,
+      "phase": "best_first"
+    },
+    {
+      "elite_prefixes": [
+        [
+          "balance",
+          "rewrite_lpz"
+        ],
+        [
+          "balance",
+          "rewrite"
+        ],
+        [
+          "balance"
+        ],
+        [
+          "lut_opt"
+        ],
+        [
+          "lut_opt_area"
+        ],
+        [
+          "rewrite"
+        ],
+        [
+          "rewrite_lp"
+        ],
+        [
+          "rewrite",
+          "balance"
+        ]
+      ],
+      "expansion": 12,
+      "phase": "elite_injection"
+    },
+    {
+      "area": 173,
+      "cost": 72.2,
+      "expanded_steps": [
+        "balance",
+        "rewrite_lpz",
+        "lut_opt_area"
+      ],
+      "expansion": 13,
+      "logic_depth": 5,
+      "phase": "best_first"
+    },
+    {
+      "area": 140,
+      "cost": 58.4,
+      "expanded_steps": [
+        "balance",
+        "refactor_lp"
+      ],
+      "expansion": 14,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 141,
+      "cost": 59.400000000000006,
+      "expanded_steps": [
+        "balance",
+        "refactor_lp",
+        "rewrite_lp"
+      ],
+      "expansion": 15,
+      "logic_depth": 5,
+      "phase": "best_first"
+    },
+    {
+      "area": 162,
+      "cost": 67.2,
+      "expanded_steps": [
+        "rewrite",
+        "rewrite_zg"
+      ],
+      "expansion": 16,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 165,
+      "cost": 68.4,
+      "expanded_steps": [
+        "rewrite",
+        "rewrite_zg",
+        "balance"
+      ],
+      "expansion": 17,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 176,
+      "cost": 72.2,
+      "expanded_steps": [
+        "rewrite",
+        "rewrite_zg",
+        "balance",
+        "refactor"
+      ],
+      "expansion": 18,
+      "logic_depth": 3,
+      "phase": "best_first"
+    },
+    {
+      "area": 176,
+      "cost": 72.2,
+      "expanded_steps": [
+        "rewrite",
+        "rewrite_zg",
+        "balance",
+        "refactor",
+        "rewrite_zg"
+      ],
+      "expansion": 19,
+      "logic_depth": 3,
+      "phase": "best_first"
+    },
+    {
+      "area": 169,
+      "cost": 71.2,
+      "expanded_steps": [
+        "balance",
+        "rewrite",
+        "balance"
+      ],
+      "expansion": 20,
+      "logic_depth": 6,
+      "phase": "best_first"
+    },
+    {
+      "area": 194,
+      "cost": 80.00000000000001,
+      "expanded_steps": [
+        "balance",
+        "rewrite",
+        "balance",
+        "refactor"
+      ],
+      "expansion": 21,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 194,
+      "cost": 80.00000000000001,
+      "expanded_steps": [
+        "balance",
+        "rewrite",
+        "balance",
+        "refactor",
+        "balance"
+      ],
+      "expansion": 22,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 166,
+      "cost": 69.4,
+      "expanded_steps": [
+        "balance",
+        "rewrite_lp"
+      ],
+      "expansion": 23,
+      "logic_depth": 5,
+      "phase": "best_first"
+    },
+    {
+      "area": 196,
+      "cost": 80.80000000000001,
+      "expanded_steps": [
+        "balance",
+        "rewrite_lp",
+        "refactor_lp"
+      ],
+      "expansion": 24,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "elite_prefixes": [
+        [
+          "balance",
+          "refactor_lp"
+        ],
+        [
+          "balance",
+          "refactor_lp",
+          "rewrite_lp"
+        ],
+        [
+          "rewrite",
+          "rewrite_zg"
+        ],
+        [
+          "balance",
+          "rewrite_lpz"
+        ],
+        [
+          "rewrite",
+          "rewrite_zg",
+          "balance",
+          "refactor"
+        ],
+        [
+          "rewrite",
+          "rewrite_zg",
+          "balance",
+          "refactor",
+          "rewrite_zg"
+        ],
+        [
+          "rewrite",
+          "rewrite_zg",
+          "balance"
+        ],
+        [
+          "balance",
+          "rewrite"
+        ]
+      ],
+      "expansion": 24,
+      "phase": "elite_injection"
+    },
+    {
+      "area": 136,
+      "cost": 56.800000000000004,
+      "expanded_steps": [
+        "balance",
+        "rewrite_lp",
+        "refactor_lp",
+        "rewrite_lpz"
+      ],
+      "expansion": 25,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 169,
+      "cost": 70.00000000000001,
+      "expanded_steps": [
+        "lut_opt",
+        "balance"
+      ],
+      "expansion": 26,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 165,
+      "cost": 68.4,
+      "expanded_steps": [
+        "lut_opt",
+        "balance",
+        "rewrite_lpz"
+      ],
+      "expansion": 27,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 170,
+      "cost": 70.4,
+      "expanded_steps": [
+        "lut_opt_area",
+        "balance"
+      ],
+      "expansion": 28,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 165,
+      "cost": 68.4,
+      "expanded_steps": [
+        "lut_opt_area",
+        "balance",
+        "rewrite_lpz"
+      ],
+      "expansion": 29,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 168,
+      "cost": 70.2,
+      "expanded_steps": [
+        "rewrite_p12"
+      ],
+      "expansion": 30,
+      "logic_depth": 5,
+      "phase": "best_first"
+    },
+    {
+      "area": 170,
+      "cost": 71.0,
+      "expanded_steps": [
+        "rewrite_p12",
+        "balance"
+      ],
+      "expansion": 31,
+      "logic_depth": 5,
+      "phase": "best_first"
+    },
+    {
+      "area": 192,
+      "cost": 79.20000000000002,
+      "expanded_steps": [
+        "rewrite_p12",
+        "balance",
+        "refactor_i12_c20"
+      ],
+      "expansion": 32,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 168,
+      "cost": 70.2,
+      "expanded_steps": [
+        "rewrite_p12_lp"
+      ],
+      "expansion": 33,
+      "logic_depth": 5,
+      "phase": "best_first"
+    },
+    {
+      "area": 170,
+      "cost": 71.0,
+      "expanded_steps": [
+        "rewrite_p12_lp",
+        "balance"
+      ],
+      "expansion": 34,
+      "logic_depth": 5,
+      "phase": "best_first"
+    },
+    {
+      "area": 192,
+      "cost": 79.20000000000002,
+      "expanded_steps": [
+        "rewrite_p12_lp",
+        "balance",
+        "refactor_i12_c20_lp"
+      ],
+      "expansion": 35,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 136,
+      "cost": 56.800000000000004,
+      "expanded_steps": [
+        "balance",
+        "rewrite_lp",
+        "refactor_lp",
+        "rewrite_lpz",
+        "balance"
+      ],
+      "expansion": 36,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "elite_prefixes": [
+        [
+          "balance",
+          "rewrite_lp",
+          "refactor_lp",
+          "rewrite_lpz"
+        ],
+        [
+          "balance",
+          "rewrite_lp",
+          "refactor_lp",
+          "rewrite_lpz",
+          "balance"
+        ],
+        [
+          "balance",
+          "refactor_lp"
+        ],
+        [
+          "balance",
+          "refactor_lp",
+          "rewrite_lp"
+        ],
+        [
+          "rewrite",
+          "rewrite_zg",
+          "balance",
+          "refactor"
+        ],
+        [
+          "rewrite",
+          "rewrite_zg",
+          "balance",
+          "refactor",
+          "rewrite_zg"
+        ],
+        [
+          "rewrite",
+          "rewrite_zg"
+        ],
+        [
+          "balance",
+          "rewrite_lpz"
+        ]
+      ],
+      "expansion": 36,
+      "phase": "elite_injection"
+    },
+    {
+      "area": 136,
+      "cost": 56.800000000000004,
+      "expanded_steps": [
+        "balance",
+        "rewrite_lp",
+        "refactor_lp",
+        "rewrite_lpz",
+        "rewrite"
+      ],
+      "expansion": 37,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 136,
+      "cost": 56.800000000000004,
+      "expanded_steps": [
+        "balance",
+        "rewrite_lp",
+        "refactor_lp",
+        "rewrite_lpz",
+        "rewrite_lp"
+      ],
+      "expansion": 38,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 136,
+      "cost": 56.800000000000004,
+      "expanded_steps": [
+        "balance",
+        "rewrite_lp",
+        "refactor_lp",
+        "rewrite_lpz",
+        "rewrite_zg"
+      ],
+      "expansion": 39,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 136,
+      "cost": 56.800000000000004,
+      "expanded_steps": [
+        "balance",
+        "rewrite_lp",
+        "refactor_lp",
+        "rewrite_lpz",
+        "rewrite_c3"
+      ],
+      "expansion": 40,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 136,
+      "cost": 56.800000000000004,
+      "expanded_steps": [
+        "balance",
+        "rewrite_lp",
+        "refactor_lp",
+        "rewrite_lpz",
+        "rewrite_c3_lp"
+      ],
+      "expansion": 41,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 136,
+      "cost": 56.800000000000004,
+      "expanded_steps": [
+        "balance",
+        "rewrite_lp",
+        "refactor_lp",
+        "rewrite_lpz",
+        "rewrite_p12"
+      ],
+      "expansion": 42,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 136,
+      "cost": 56.800000000000004,
+      "expanded_steps": [
+        "balance",
+        "rewrite_lp",
+        "refactor_lp",
+        "rewrite_lpz",
+        "rewrite_p12_lp"
+      ],
+      "expansion": 43,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 136,
+      "cost": 56.800000000000004,
+      "expanded_steps": [
+        "balance",
+        "rewrite_lp",
+        "refactor_lp",
+        "rewrite_lpz",
+        "rewrite_p12_lpz"
+      ],
+      "expansion": 44,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 136,
+      "cost": 56.800000000000004,
+      "expanded_steps": [
+        "balance",
+        "rewrite_lp",
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor"
+      ],
+      "expansion": 45,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 136,
+      "cost": 56.800000000000004,
+      "expanded_steps": [
+        "balance",
+        "rewrite_lp",
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor_lp"
+      ],
+      "expansion": 46,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 136,
+      "cost": 56.800000000000004,
+      "expanded_steps": [
+        "balance",
+        "rewrite_lp",
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor_zg"
+      ],
+      "expansion": 47,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 136,
+      "cost": 56.800000000000004,
+      "expanded_steps": [
+        "balance",
+        "rewrite_lp",
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor_lpz"
+      ],
+      "expansion": 48,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "elite_prefixes": [
+        [
+          "balance",
+          "rewrite_lp",
+          "refactor_lp",
+          "rewrite_lpz"
+        ],
+        [
+          "balance",
+          "rewrite_lp",
+          "refactor_lp",
+          "rewrite_lpz",
+          "balance"
+        ],
+        [
+          "balance",
+          "rewrite_lp",
+          "refactor_lp",
+          "rewrite_lpz",
+          "rewrite"
+        ],
+        [
+          "balance",
+          "rewrite_lp",
+          "refactor_lp",
+          "rewrite_lpz",
+          "rewrite_lp"
+        ],
+        [
+          "rewrite",
+          "rewrite_zg",
+          "balance",
+          "refactor"
+        ],
+        [
+          "rewrite",
+          "rewrite_zg",
+          "balance",
+          "refactor",
+          "rewrite_zg"
+        ],
+        [
+          "balance",
+          "rewrite_lp",
+          "refactor_lp",
+          "rewrite_lpz",
+          "rewrite_zg"
+        ],
+        [
+          "balance",
+          "rewrite_lp",
+          "refactor_lp",
+          "rewrite_lpz",
+          "rewrite_c3"
+        ]
+      ],
+      "expansion": 48,
+      "phase": "elite_injection"
+    },
+    {
+      "area": 136,
+      "cost": 56.800000000000004,
+      "expanded_steps": [
+        "balance",
+        "rewrite_lp",
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor_i12_c20"
+      ],
+      "expansion": 49,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 136,
+      "cost": 56.800000000000004,
+      "expanded_steps": [
+        "balance",
+        "rewrite_lp",
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor_i12_c20_lp"
+      ],
+      "expansion": 50,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 136,
+      "cost": 56.800000000000004,
+      "expanded_steps": [
+        "balance",
+        "rewrite_lp",
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor_i8_c12"
+      ],
+      "expansion": 51,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 136,
+      "cost": 56.800000000000004,
+      "expanded_steps": [
+        "balance",
+        "rewrite_lp",
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor_i8_c12_lp"
+      ],
+      "expansion": 52,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 136,
+      "cost": 56.800000000000004,
+      "expanded_steps": [
+        "balance",
+        "rewrite_lp",
+        "refactor_lp",
+        "rewrite_lpz",
+        "lut_opt"
+      ],
+      "expansion": 53,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 136,
+      "cost": 56.800000000000004,
+      "expanded_steps": [
+        "balance",
+        "rewrite_lp",
+        "refactor_lp",
+        "rewrite_lpz",
+        "lut_opt_zg"
+      ],
+      "expansion": 54,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 136,
+      "cost": 56.800000000000004,
+      "expanded_steps": [
+        "balance",
+        "rewrite_lp",
+        "refactor_lp",
+        "rewrite_lpz",
+        "lut_opt_c4"
+      ],
+      "expansion": 55,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 136,
+      "cost": 56.800000000000004,
+      "expanded_steps": [
+        "balance",
+        "rewrite_lp",
+        "refactor_lp",
+        "rewrite_lpz",
+        "lut_opt_area"
+      ],
+      "expansion": 56,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 136,
+      "cost": 56.800000000000004,
+      "expanded_steps": [
+        "balance",
+        "rewrite_lp",
+        "refactor_lp",
+        "rewrite_lpz",
+        "lut_opt_area_zg"
+      ],
+      "expansion": 57,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 136,
+      "cost": 56.800000000000004,
+      "expanded_steps": [
+        "balance",
+        "rewrite_lp",
+        "refactor_lp",
+        "rewrite_lpz",
+        "lut_opt_fast"
+      ],
+      "expansion": 58,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 136,
+      "cost": 56.2,
+      "expanded_steps": [
+        "rewrite_lp",
+        "refactor_lp",
+        "rewrite_lpz"
+      ],
+      "expansion": 59,
+      "logic_depth": 3,
+      "phase": "best_first"
+    },
+    {
+      "area": 138,
+      "cost": 57.0,
+      "expanded_steps": [
+        "rewrite_lp",
+        "refactor_lp",
+        "rewrite_lpz",
+        "balance"
+      ],
+      "expansion": 60,
+      "logic_depth": 3,
+      "phase": "best_first"
+    },
+    {
+      "elite_prefixes": [
+        [
+          "rewrite_lp",
+          "refactor_lp",
+          "rewrite_lpz"
+        ],
+        [
+          "balance",
+          "rewrite_lp",
+          "refactor_lp",
+          "rewrite_lpz"
+        ],
+        [
+          "balance",
+          "rewrite_lp",
+          "refactor_lp",
+          "rewrite_lpz",
+          "balance"
+        ],
+        [
+          "balance",
+          "rewrite_lp",
+          "refactor_lp",
+          "rewrite_lpz",
+          "rewrite"
+        ],
+        [
+          "rewrite_lp",
+          "refactor_lp",
+          "rewrite_lpz",
+          "balance"
+        ],
+        [
+          "rewrite",
+          "rewrite_zg",
+          "balance",
+          "refactor"
+        ],
+        [
+          "rewrite",
+          "rewrite_zg",
+          "balance",
+          "refactor",
+          "rewrite_zg"
+        ],
+        [
+          "balance",
+          "rewrite_lp",
+          "refactor_lp",
+          "rewrite_lpz",
+          "rewrite_lp"
+        ]
+      ],
+      "expansion": 60,
+      "phase": "elite_injection"
+    },
+    {
+      "area": 137,
+      "cost": 56.6,
+      "expanded_steps": [
+        "rewrite_lp",
+        "refactor_lp",
+        "rewrite_lpz",
+        "rewrite"
+      ],
+      "expansion": 61,
+      "logic_depth": 3,
+      "phase": "best_first"
+    },
+    {
+      "area": 137,
+      "cost": 56.6,
+      "expanded_steps": [
+        "rewrite_lp",
+        "refactor_lp",
+        "rewrite_lpz",
+        "rewrite_lp"
+      ],
+      "expansion": 62,
+      "logic_depth": 3,
+      "phase": "best_first"
+    },
+    {
+      "area": 137,
+      "cost": 56.6,
+      "expanded_steps": [
+        "rewrite_lp",
+        "refactor_lp",
+        "rewrite_lpz",
+        "rewrite_zg"
+      ],
+      "expansion": 63,
+      "logic_depth": 3,
+      "phase": "best_first"
+    },
+    {
+      "area": 136,
+      "cost": 56.2,
+      "expanded_steps": [
+        "rewrite_lp",
+        "refactor_lp",
+        "rewrite_lpz",
+        "rewrite_c3"
+      ],
+      "expansion": 64,
+      "logic_depth": 3,
+      "phase": "best_first"
+    },
+    {
+      "area": 136,
+      "cost": 56.2,
+      "expanded_steps": [
+        "rewrite_lp",
+        "refactor_lp",
+        "rewrite_lpz",
+        "rewrite_c3_lp"
+      ],
+      "expansion": 65,
+      "logic_depth": 3,
+      "phase": "best_first"
+    },
+    {
+      "area": 137,
+      "cost": 56.6,
+      "expanded_steps": [
+        "rewrite_lp",
+        "refactor_lp",
+        "rewrite_lpz",
+        "rewrite_p12"
+      ],
+      "expansion": 66,
+      "logic_depth": 3,
+      "phase": "best_first"
+    },
+    {
+      "area": 137,
+      "cost": 56.6,
+      "expanded_steps": [
+        "rewrite_lp",
+        "refactor_lp",
+        "rewrite_lpz",
+        "rewrite_p12_lp"
+      ],
+      "expansion": 67,
+      "logic_depth": 3,
+      "phase": "best_first"
+    },
+    {
+      "area": 137,
+      "cost": 56.6,
+      "expanded_steps": [
+        "rewrite_lp",
+        "refactor_lp",
+        "rewrite_lpz",
+        "rewrite_p12_lpz"
+      ],
+      "expansion": 68,
+      "logic_depth": 3,
+      "phase": "best_first"
+    },
+    {
+      "area": 135,
+      "cost": 56.4,
+      "expanded_steps": [
+        "rewrite_lp",
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor"
+      ],
+      "expansion": 69,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 136,
+      "cost": 56.800000000000004,
+      "expanded_steps": [
+        "rewrite_lp",
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor_lp"
+      ],
+      "expansion": 70,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 135,
+      "cost": 55.8,
+      "expanded_steps": [
+        "rewrite_lp",
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor_zg"
+      ],
+      "expansion": 71,
+      "logic_depth": 3,
+      "phase": "best_first"
+    },
+    {
+      "area": 135,
+      "cost": 55.8,
+      "expanded_steps": [
+        "rewrite_lp",
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor_zg",
+        "balance"
+      ],
+      "expansion": 72,
+      "logic_depth": 3,
+      "phase": "best_first"
+    },
+    {
+      "elite_prefixes": [
+        [
+          "rewrite_lp",
+          "refactor_lp",
+          "rewrite_lpz",
+          "refactor_zg"
+        ],
+        [
+          "rewrite_lp",
+          "refactor_lp",
+          "rewrite_lpz",
+          "refactor_zg",
+          "balance"
+        ],
+        [
+          "rewrite_lp",
+          "refactor_lp",
+          "rewrite_lpz"
+        ],
+        [
+          "rewrite_lp",
+          "refactor_lp",
+          "rewrite_lpz",
+          "rewrite_c3"
+        ],
+        [
+          "rewrite_lp",
+          "refactor_lp",
+          "rewrite_lpz",
+          "refactor"
+        ],
+        [
+          "rewrite_lp",
+          "refactor_lp",
+          "rewrite_lpz",
+          "rewrite_c3_lp"
+        ],
+        [
+          "rewrite_lp",
+          "refactor_lp",
+          "rewrite_lpz",
+          "rewrite"
+        ],
+        [
+          "rewrite_lp",
+          "refactor_lp",
+          "rewrite_lpz",
+          "rewrite_lp"
+        ]
+      ],
+      "expansion": 72,
+      "phase": "elite_injection"
+    },
+    {
+      "area": 135,
+      "cost": 55.8,
+      "expanded_steps": [
+        "rewrite_lp",
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor_zg",
+        "rewrite"
+      ],
+      "expansion": 73,
+      "logic_depth": 3,
+      "phase": "best_first"
+    },
+    {
+      "area": 135,
+      "cost": 55.8,
+      "expanded_steps": [
+        "rewrite_lp",
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor_zg",
+        "rewrite_lp"
+      ],
+      "expansion": 74,
+      "logic_depth": 3,
+      "phase": "best_first"
+    },
+    {
+      "area": 135,
+      "cost": 55.8,
+      "expanded_steps": [
+        "rewrite_lp",
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor_zg",
+        "rewrite_zg"
+      ],
+      "expansion": 75,
+      "logic_depth": 3,
+      "phase": "best_first"
+    },
+    {
+      "area": 135,
+      "cost": 55.8,
+      "expanded_steps": [
+        "rewrite_lp",
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor_zg",
+        "rewrite_lpz"
+      ],
+      "expansion": 76,
+      "logic_depth": 3,
+      "phase": "best_first"
+    },
+    {
+      "area": 135,
+      "cost": 55.8,
+      "expanded_steps": [
+        "rewrite_lp",
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor_zg",
+        "rewrite_c3"
+      ],
+      "expansion": 77,
+      "logic_depth": 3,
+      "phase": "best_first"
+    },
+    {
+      "area": 135,
+      "cost": 55.8,
+      "expanded_steps": [
+        "rewrite_lp",
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor_zg",
+        "rewrite_c3_lp"
+      ],
+      "expansion": 78,
+      "logic_depth": 3,
+      "phase": "best_first"
+    },
+    {
+      "area": 135,
+      "cost": 55.8,
+      "expanded_steps": [
+        "rewrite_lp",
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor_zg",
+        "rewrite_p12"
+      ],
+      "expansion": 79,
+      "logic_depth": 3,
+      "phase": "best_first"
+    },
+    {
+      "area": 135,
+      "cost": 55.8,
+      "expanded_steps": [
+        "rewrite_lp",
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor_zg",
+        "rewrite_p12_lp"
+      ],
+      "expansion": 80,
+      "logic_depth": 3,
+      "phase": "best_first"
+    },
+    {
+      "area": 135,
+      "cost": 55.8,
+      "expanded_steps": [
+        "rewrite_lp",
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor_zg",
+        "rewrite_p12_lpz"
+      ],
+      "expansion": 81,
+      "logic_depth": 3,
+      "phase": "best_first"
+    },
+    {
+      "area": 135,
+      "cost": 55.8,
+      "expanded_steps": [
+        "rewrite_lp",
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor_zg",
+        "refactor"
+      ],
+      "expansion": 82,
+      "logic_depth": 3,
+      "phase": "best_first"
+    },
+    {
+      "area": 135,
+      "cost": 55.8,
+      "expanded_steps": [
+        "rewrite_lp",
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor_zg",
+        "refactor_lp"
+      ],
+      "expansion": 83,
+      "logic_depth": 3,
+      "phase": "best_first"
+    },
+    {
+      "area": 135,
+      "cost": 55.8,
+      "expanded_steps": [
+        "rewrite_lp",
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor_zg",
+        "refactor_lpz"
+      ],
+      "expansion": 84,
+      "logic_depth": 3,
+      "phase": "best_first"
+    },
+    {
+      "elite_prefixes": [
+        [
+          "rewrite_lp",
+          "refactor_lp",
+          "rewrite_lpz",
+          "refactor_zg"
+        ],
+        [
+          "rewrite_lp",
+          "refactor_lp",
+          "rewrite_lpz",
+          "refactor_zg",
+          "balance"
+        ],
+        [
+          "rewrite_lp",
+          "refactor_lp",
+          "rewrite_lpz",
+          "refactor_zg",
+          "rewrite"
+        ],
+        [
+          "rewrite_lp",
+          "refactor_lp",
+          "rewrite_lpz",
+          "refactor_zg",
+          "rewrite_lp"
+        ],
+        [
+          "rewrite_lp",
+          "refactor_lp",
+          "rewrite_lpz",
+          "refactor_zg",
+          "rewrite_zg"
+        ],
+        [
+          "rewrite_lp",
+          "refactor_lp",
+          "rewrite_lpz",
+          "refactor_zg",
+          "rewrite_lpz"
+        ],
+        [
+          "rewrite_lp",
+          "refactor_lp",
+          "rewrite_lpz",
+          "refactor_zg",
+          "rewrite_c3"
+        ],
+        [
+          "rewrite_lp",
+          "refactor_lp",
+          "rewrite_lpz",
+          "refactor_zg",
+          "rewrite_c3_lp"
+        ]
+      ],
+      "expansion": 84,
+      "phase": "elite_injection"
+    },
+    {
+      "area": 135,
+      "cost": 55.8,
+      "expanded_steps": [
+        "rewrite_lp",
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor_zg",
+        "refactor_i12_c20"
+      ],
+      "expansion": 85,
+      "logic_depth": 3,
+      "phase": "best_first"
+    },
+    {
+      "area": 135,
+      "cost": 55.8,
+      "expanded_steps": [
+        "rewrite_lp",
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor_zg",
+        "refactor_i12_c20_lp"
+      ],
+      "expansion": 86,
+      "logic_depth": 3,
+      "phase": "best_first"
+    },
+    {
+      "area": 135,
+      "cost": 55.8,
+      "expanded_steps": [
+        "rewrite_lp",
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor_zg",
+        "refactor_i8_c12"
+      ],
+      "expansion": 87,
+      "logic_depth": 3,
+      "phase": "best_first"
+    },
+    {
+      "area": 135,
+      "cost": 55.8,
+      "expanded_steps": [
+        "rewrite_lp",
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor_zg",
+        "refactor_i8_c12_lp"
+      ],
+      "expansion": 88,
+      "logic_depth": 3,
+      "phase": "best_first"
+    },
+    {
+      "area": 135,
+      "cost": 55.8,
+      "expanded_steps": [
+        "rewrite_lp",
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor_zg",
+        "lut_opt"
+      ],
+      "expansion": 89,
+      "logic_depth": 3,
+      "phase": "best_first"
+    },
+    {
+      "area": 135,
+      "cost": 55.8,
+      "expanded_steps": [
+        "rewrite_lp",
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor_zg",
+        "lut_opt_zg"
+      ],
+      "expansion": 90,
+      "logic_depth": 3,
+      "phase": "best_first"
+    },
+    {
+      "area": 135,
+      "cost": 55.8,
+      "expanded_steps": [
+        "rewrite_lp",
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor_zg",
+        "lut_opt_c4"
+      ],
+      "expansion": 91,
+      "logic_depth": 3,
+      "phase": "best_first"
+    },
+    {
+      "area": 135,
+      "cost": 55.8,
+      "expanded_steps": [
+        "rewrite_lp",
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor_zg",
+        "lut_opt_area"
+      ],
+      "expansion": 92,
+      "logic_depth": 3,
+      "phase": "best_first"
+    },
+    {
+      "area": 135,
+      "cost": 55.8,
+      "expanded_steps": [
+        "rewrite_lp",
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor_zg",
+        "lut_opt_area_zg"
+      ],
+      "expansion": 93,
+      "logic_depth": 3,
+      "phase": "best_first"
+    },
+    {
+      "area": 135,
+      "cost": 55.8,
+      "expanded_steps": [
+        "rewrite_lp",
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor_zg",
+        "lut_opt_fast"
+      ],
+      "expansion": 94,
+      "logic_depth": 3,
+      "phase": "best_first"
+    },
+    {
+      "area": 133,
+      "cost": 55.6,
+      "expanded_steps": [
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor_zg"
+      ],
+      "expansion": 95,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 117,
+      "cost": 49.2,
+      "expanded_steps": [
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor_zg",
+        "balance"
+      ],
+      "expansion": 96,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "elite_prefixes": [
+        [
+          "refactor_lp",
+          "rewrite_lpz",
+          "refactor_zg",
+          "balance"
+        ],
+        [
+          "refactor_lp",
+          "rewrite_lpz",
+          "refactor_zg"
+        ],
+        [
+          "rewrite_lp",
+          "refactor_lp",
+          "rewrite_lpz",
+          "refactor_zg"
+        ],
+        [
+          "rewrite_lp",
+          "refactor_lp",
+          "rewrite_lpz",
+          "refactor_zg",
+          "balance"
+        ],
+        [
+          "rewrite_lp",
+          "refactor_lp",
+          "rewrite_lpz",
+          "refactor_zg",
+          "rewrite"
+        ],
+        [
+          "rewrite_lp",
+          "refactor_lp",
+          "rewrite_lpz",
+          "refactor_zg",
+          "rewrite_lp"
+        ],
+        [
+          "rewrite_lp",
+          "refactor_lp",
+          "rewrite_lpz",
+          "refactor_zg",
+          "rewrite_zg"
+        ],
+        [
+          "rewrite_lp",
+          "refactor_lp",
+          "rewrite_lpz",
+          "refactor_zg",
+          "rewrite_lpz"
+        ]
+      ],
+      "expansion": 96,
+      "phase": "elite_injection"
+    },
+    {
+      "area": 117,
+      "cost": 49.2,
+      "expanded_steps": [
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor_zg",
+        "balance",
+        "rewrite"
+      ],
+      "expansion": 97,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 117,
+      "cost": 49.2,
+      "expanded_steps": [
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor_zg",
+        "balance",
+        "rewrite_lp"
+      ],
+      "expansion": 98,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 117,
+      "cost": 49.2,
+      "expanded_steps": [
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor_zg",
+        "balance",
+        "rewrite_zg"
+      ],
+      "expansion": 99,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 117,
+      "cost": 49.2,
+      "expanded_steps": [
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor_zg",
+        "balance",
+        "rewrite_lpz"
+      ],
+      "expansion": 100,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 117,
+      "cost": 49.2,
+      "expanded_steps": [
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor_zg",
+        "balance",
+        "rewrite_c3"
+      ],
+      "expansion": 101,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 117,
+      "cost": 49.2,
+      "expanded_steps": [
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor_zg",
+        "balance",
+        "rewrite_c3_lp"
+      ],
+      "expansion": 102,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 117,
+      "cost": 49.2,
+      "expanded_steps": [
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor_zg",
+        "balance",
+        "rewrite_p12"
+      ],
+      "expansion": 103,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 117,
+      "cost": 49.2,
+      "expanded_steps": [
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor_zg",
+        "balance",
+        "rewrite_p12_lp"
+      ],
+      "expansion": 104,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 117,
+      "cost": 49.2,
+      "expanded_steps": [
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor_zg",
+        "balance",
+        "rewrite_p12_lpz"
+      ],
+      "expansion": 105,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 117,
+      "cost": 49.2,
+      "expanded_steps": [
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor_zg",
+        "balance",
+        "refactor"
+      ],
+      "expansion": 106,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 117,
+      "cost": 49.2,
+      "expanded_steps": [
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor_zg",
+        "balance",
+        "refactor_lp"
+      ],
+      "expansion": 107,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 117,
+      "cost": 49.2,
+      "expanded_steps": [
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor_zg",
+        "balance",
+        "refactor_lpz"
+      ],
+      "expansion": 108,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "elite_prefixes": [
+        [
+          "refactor_lp",
+          "rewrite_lpz",
+          "refactor_zg",
+          "balance"
+        ],
+        [
+          "refactor_lp",
+          "rewrite_lpz",
+          "refactor_zg",
+          "balance",
+          "rewrite"
+        ],
+        [
+          "refactor_lp",
+          "rewrite_lpz",
+          "refactor_zg",
+          "balance",
+          "rewrite_lp"
+        ],
+        [
+          "refactor_lp",
+          "rewrite_lpz",
+          "refactor_zg",
+          "balance",
+          "rewrite_zg"
+        ],
+        [
+          "rewrite_lp",
+          "refactor_lp",
+          "rewrite_lpz",
+          "refactor_zg"
+        ],
+        [
+          "rewrite_lp",
+          "refactor_lp",
+          "rewrite_lpz",
+          "refactor_zg",
+          "balance"
+        ],
+        [
+          "rewrite_lp",
+          "refactor_lp",
+          "rewrite_lpz",
+          "refactor_zg",
+          "rewrite"
+        ],
+        [
+          "rewrite_lp",
+          "refactor_lp",
+          "rewrite_lpz",
+          "refactor_zg",
+          "rewrite_lp"
+        ]
+      ],
+      "expansion": 108,
+      "phase": "elite_injection"
+    },
+    {
+      "area": 117,
+      "cost": 49.2,
+      "expanded_steps": [
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor_zg",
+        "balance",
+        "refactor_i12_c20"
+      ],
+      "expansion": 109,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 117,
+      "cost": 49.2,
+      "expanded_steps": [
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor_zg",
+        "balance",
+        "refactor_i12_c20_lp"
+      ],
+      "expansion": 110,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 117,
+      "cost": 49.2,
+      "expanded_steps": [
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor_zg",
+        "balance",
+        "refactor_i8_c12"
+      ],
+      "expansion": 111,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 117,
+      "cost": 49.2,
+      "expanded_steps": [
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor_zg",
+        "balance",
+        "refactor_i8_c12_lp"
+      ],
+      "expansion": 112,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 117,
+      "cost": 49.2,
+      "expanded_steps": [
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor_zg",
+        "balance",
+        "lut_opt"
+      ],
+      "expansion": 113,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 117,
+      "cost": 49.2,
+      "expanded_steps": [
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor_zg",
+        "balance",
+        "lut_opt_zg"
+      ],
+      "expansion": 114,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 117,
+      "cost": 49.2,
+      "expanded_steps": [
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor_zg",
+        "balance",
+        "lut_opt_c4"
+      ],
+      "expansion": 115,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 117,
+      "cost": 49.2,
+      "expanded_steps": [
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor_zg",
+        "balance",
+        "lut_opt_area"
+      ],
+      "expansion": 116,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 117,
+      "cost": 49.2,
+      "expanded_steps": [
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor_zg",
+        "balance",
+        "lut_opt_area_zg"
+      ],
+      "expansion": 117,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 117,
+      "cost": 49.2,
+      "expanded_steps": [
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor_zg",
+        "balance",
+        "lut_opt_fast"
+      ],
+      "expansion": 118,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 180,
+      "cost": 74.4,
+      "expanded_steps": [
+        "rewrite_lpz",
+        "refactor_zg",
+        "balance"
+      ],
+      "expansion": 119,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 136,
+      "cost": 56.800000000000004,
+      "expanded_steps": [
+        "refactor_lp",
+        "refactor_zg",
+        "balance"
+      ],
+      "expansion": 120,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "elite_prefixes": [
+        [
+          "refactor_lp",
+          "rewrite_lpz",
+          "refactor_zg",
+          "balance"
+        ],
+        [
+          "refactor_lp",
+          "rewrite_lpz",
+          "refactor_zg",
+          "balance",
+          "rewrite"
+        ],
+        [
+          "refactor_lp",
+          "rewrite_lpz",
+          "refactor_zg",
+          "balance",
+          "rewrite_lp"
+        ],
+        [
+          "refactor_lp",
+          "rewrite_lpz",
+          "refactor_zg",
+          "balance",
+          "rewrite_zg"
+        ],
+        [
+          "rewrite_lp",
+          "refactor_lp",
+          "rewrite_lpz",
+          "refactor_zg"
+        ],
+        [
+          "rewrite_lp",
+          "refactor_lp",
+          "rewrite_lpz",
+          "refactor_zg",
+          "balance"
+        ],
+        [
+          "rewrite_lp",
+          "refactor_lp",
+          "rewrite_lpz",
+          "refactor_zg",
+          "rewrite"
+        ],
+        [
+          "rewrite_lp",
+          "refactor_lp",
+          "rewrite_lpz",
+          "refactor_zg",
+          "rewrite_lp"
+        ]
+      ],
+      "expansion": 120,
+      "phase": "elite_injection"
+    },
+    {
+      "area": 137,
+      "cost": 57.2,
+      "expanded_steps": [
+        "refactor_lp",
+        "rewrite_lpz",
+        "balance"
+      ],
+      "expansion": 121,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 178,
+      "cost": 73.60000000000001,
+      "expanded_steps": [
+        "rewrite_lpz",
+        "refactor_zg",
+        "balance",
+        "rewrite"
+      ],
+      "expansion": 122,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 135,
+      "cost": 56.4,
+      "expanded_steps": [
+        "refactor_lp",
+        "refactor_zg",
+        "balance",
+        "rewrite"
+      ],
+      "expansion": 123,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 137,
+      "cost": 57.2,
+      "expanded_steps": [
+        "refactor_lp",
+        "rewrite_lpz",
+        "balance",
+        "rewrite"
+      ],
+      "expansion": 124,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 103,
+      "cost": 43.6,
+      "expanded_steps": [
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor_zg",
+        "rewrite"
+      ],
+      "expansion": 125,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 103,
+      "cost": 43.6,
+      "expanded_steps": [
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor_zg",
+        "rewrite",
+        "balance"
+      ],
+      "expansion": 126,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 103,
+      "cost": 43.6,
+      "expanded_steps": [
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor_zg",
+        "rewrite",
+        "rewrite_lp"
+      ],
+      "expansion": 127,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 103,
+      "cost": 43.6,
+      "expanded_steps": [
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor_zg",
+        "rewrite",
+        "rewrite_zg"
+      ],
+      "expansion": 128,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 103,
+      "cost": 43.6,
+      "expanded_steps": [
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor_zg",
+        "rewrite",
+        "rewrite_lpz"
+      ],
+      "expansion": 129,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 103,
+      "cost": 43.6,
+      "expanded_steps": [
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor_zg",
+        "rewrite",
+        "rewrite_c3"
+      ],
+      "expansion": 130,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 103,
+      "cost": 43.6,
+      "expanded_steps": [
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor_zg",
+        "rewrite",
+        "rewrite_c3_lp"
+      ],
+      "expansion": 131,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 103,
+      "cost": 43.6,
+      "expanded_steps": [
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor_zg",
+        "rewrite",
+        "rewrite_p12"
+      ],
+      "expansion": 132,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "elite_prefixes": [
+        [
+          "refactor_lp",
+          "rewrite_lpz",
+          "refactor_zg",
+          "rewrite"
+        ],
+        [
+          "refactor_lp",
+          "rewrite_lpz",
+          "refactor_zg",
+          "rewrite",
+          "balance"
+        ],
+        [
+          "refactor_lp",
+          "rewrite_lpz",
+          "refactor_zg",
+          "rewrite",
+          "rewrite_lp"
+        ],
+        [
+          "refactor_lp",
+          "rewrite_lpz",
+          "refactor_zg",
+          "rewrite",
+          "rewrite_zg"
+        ],
+        [
+          "rewrite_lp",
+          "refactor_lp",
+          "rewrite_lpz",
+          "refactor_zg"
+        ],
+        [
+          "rewrite_lp",
+          "refactor_lp",
+          "rewrite_lpz",
+          "refactor_zg",
+          "balance"
+        ],
+        [
+          "rewrite_lp",
+          "refactor_lp",
+          "rewrite_lpz",
+          "refactor_zg",
+          "rewrite"
+        ],
+        [
+          "rewrite_lp",
+          "refactor_lp",
+          "rewrite_lpz",
+          "refactor_zg",
+          "rewrite_lp"
+        ]
+      ],
+      "expansion": 132,
+      "phase": "elite_injection"
+    },
+    {
+      "area": 103,
+      "cost": 43.6,
+      "expanded_steps": [
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor_zg",
+        "rewrite",
+        "rewrite_p12_lp"
+      ],
+      "expansion": 133,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 103,
+      "cost": 43.6,
+      "expanded_steps": [
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor_zg",
+        "rewrite",
+        "rewrite_p12_lpz"
+      ],
+      "expansion": 134,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 103,
+      "cost": 43.6,
+      "expanded_steps": [
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor_zg",
+        "rewrite",
+        "refactor"
+      ],
+      "expansion": 135,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 103,
+      "cost": 43.6,
+      "expanded_steps": [
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor_zg",
+        "rewrite",
+        "refactor_lp"
+      ],
+      "expansion": 136,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 103,
+      "cost": 43.6,
+      "expanded_steps": [
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor_zg",
+        "rewrite",
+        "refactor_zg"
+      ],
+      "expansion": 137,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 103,
+      "cost": 43.6,
+      "expanded_steps": [
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor_zg",
+        "rewrite",
+        "refactor_lpz"
+      ],
+      "expansion": 138,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 103,
+      "cost": 43.6,
+      "expanded_steps": [
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor_zg",
+        "rewrite",
+        "refactor_i12_c20"
+      ],
+      "expansion": 139,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 103,
+      "cost": 43.6,
+      "expanded_steps": [
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor_zg",
+        "rewrite",
+        "refactor_i12_c20_lp"
+      ],
+      "expansion": 140,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 103,
+      "cost": 43.6,
+      "expanded_steps": [
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor_zg",
+        "rewrite",
+        "refactor_i8_c12"
+      ],
+      "expansion": 141,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 103,
+      "cost": 43.6,
+      "expanded_steps": [
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor_zg",
+        "rewrite",
+        "refactor_i8_c12_lp"
+      ],
+      "expansion": 142,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 103,
+      "cost": 43.6,
+      "expanded_steps": [
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor_zg",
+        "rewrite",
+        "lut_opt"
+      ],
+      "expansion": 143,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 103,
+      "cost": 43.6,
+      "expanded_steps": [
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor_zg",
+        "rewrite",
+        "lut_opt_zg"
+      ],
+      "expansion": 144,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "elite_prefixes": [
+        [
+          "refactor_lp",
+          "rewrite_lpz",
+          "refactor_zg",
+          "rewrite"
+        ],
+        [
+          "refactor_lp",
+          "rewrite_lpz",
+          "refactor_zg",
+          "rewrite",
+          "balance"
+        ],
+        [
+          "refactor_lp",
+          "rewrite_lpz",
+          "refactor_zg",
+          "rewrite",
+          "rewrite_lp"
+        ],
+        [
+          "refactor_lp",
+          "rewrite_lpz",
+          "refactor_zg",
+          "rewrite",
+          "rewrite_zg"
+        ],
+        [
+          "rewrite_lp",
+          "refactor_lp",
+          "rewrite_lpz",
+          "refactor_zg"
+        ],
+        [
+          "rewrite_lp",
+          "refactor_lp",
+          "rewrite_lpz",
+          "refactor_zg",
+          "balance"
+        ],
+        [
+          "rewrite_lp",
+          "refactor_lp",
+          "rewrite_lpz",
+          "refactor_zg",
+          "rewrite"
+        ],
+        [
+          "rewrite_lp",
+          "refactor_lp",
+          "rewrite_lpz",
+          "refactor_zg",
+          "rewrite_lp"
+        ]
+      ],
+      "expansion": 144,
+      "phase": "elite_injection"
+    },
+    {
+      "area": 103,
+      "cost": 43.6,
+      "expanded_steps": [
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor_zg",
+        "rewrite",
+        "lut_opt_c4"
+      ],
+      "expansion": 145,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 103,
+      "cost": 43.6,
+      "expanded_steps": [
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor_zg",
+        "rewrite",
+        "lut_opt_area"
+      ],
+      "expansion": 146,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 103,
+      "cost": 43.6,
+      "expanded_steps": [
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor_zg",
+        "rewrite",
+        "lut_opt_area_zg"
+      ],
+      "expansion": 147,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 103,
+      "cost": 43.6,
+      "expanded_steps": [
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor_zg",
+        "rewrite",
+        "lut_opt_fast"
+      ],
+      "expansion": 148,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 177,
+      "cost": 73.2,
+      "expanded_steps": [
+        "rewrite_lpz",
+        "refactor_zg",
+        "rewrite"
+      ],
+      "expansion": 149,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 137,
+      "cost": 57.2,
+      "expanded_steps": [
+        "refactor_lp",
+        "refactor_zg",
+        "rewrite"
+      ],
+      "expansion": 150,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 139,
+      "cost": 58.0,
+      "expanded_steps": [
+        "refactor_lp",
+        "rewrite_lpz",
+        "rewrite"
+      ],
+      "expansion": 151,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 179,
+      "cost": 74.00000000000001,
+      "expanded_steps": [
+        "rewrite_lpz",
+        "refactor_zg",
+        "rewrite",
+        "balance"
+      ],
+      "expansion": 152,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 138,
+      "cost": 57.6,
+      "expanded_steps": [
+        "refactor_lp",
+        "refactor_zg",
+        "rewrite",
+        "balance"
+      ],
+      "expansion": 153,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 136,
+      "cost": 56.800000000000004,
+      "expanded_steps": [
+        "refactor_lp",
+        "rewrite_lpz",
+        "rewrite",
+        "balance"
+      ],
+      "expansion": 154,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 174,
+      "cost": 72.00000000000001,
+      "expanded_steps": [
+        "rewrite_lpz",
+        "refactor_zg",
+        "rewrite",
+        "rewrite_lp"
+      ],
+      "expansion": 155,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 136,
+      "cost": 56.800000000000004,
+      "expanded_steps": [
+        "refactor_lp",
+        "refactor_zg",
+        "rewrite",
+        "rewrite_lp"
+      ],
+      "expansion": 156,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "elite_prefixes": [
+        [
+          "refactor_lp",
+          "rewrite_lpz",
+          "refactor_zg",
+          "rewrite"
+        ],
+        [
+          "refactor_lp",
+          "rewrite_lpz",
+          "refactor_zg",
+          "rewrite",
+          "balance"
+        ],
+        [
+          "refactor_lp",
+          "rewrite_lpz",
+          "refactor_zg",
+          "rewrite",
+          "rewrite_lp"
+        ],
+        [
+          "refactor_lp",
+          "rewrite_lpz",
+          "refactor_zg",
+          "rewrite",
+          "rewrite_zg"
+        ],
+        [
+          "rewrite_lp",
+          "refactor_lp",
+          "rewrite_lpz",
+          "refactor_zg"
+        ],
+        [
+          "rewrite_lp",
+          "refactor_lp",
+          "rewrite_lpz",
+          "refactor_zg",
+          "balance"
+        ],
+        [
+          "rewrite_lp",
+          "refactor_lp",
+          "rewrite_lpz",
+          "refactor_zg",
+          "rewrite"
+        ],
+        [
+          "rewrite_lp",
+          "refactor_lp",
+          "rewrite_lpz",
+          "refactor_zg",
+          "rewrite_lp"
+        ]
+      ],
+      "expansion": 156,
+      "phase": "elite_injection"
+    },
+    {
+      "area": 137,
+      "cost": 57.2,
+      "expanded_steps": [
+        "refactor_lp",
+        "rewrite_lpz",
+        "rewrite",
+        "rewrite_lp"
+      ],
+      "expansion": 157,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 103,
+      "cost": 43.6,
+      "expanded_steps": [
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor_zg",
+        "rewrite_lp"
+      ],
+      "expansion": 158,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 103,
+      "cost": 43.6,
+      "expanded_steps": [
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor_zg",
+        "rewrite_lp",
+        "balance"
+      ],
+      "expansion": 159,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 103,
+      "cost": 43.6,
+      "expanded_steps": [
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor_zg",
+        "rewrite_lp",
+        "rewrite"
+      ],
+      "expansion": 160,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 103,
+      "cost": 43.6,
+      "expanded_steps": [
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor_zg",
+        "rewrite_lp",
+        "rewrite_zg"
+      ],
+      "expansion": 161,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 103,
+      "cost": 43.6,
+      "expanded_steps": [
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor_zg",
+        "rewrite_lp",
+        "rewrite_lpz"
+      ],
+      "expansion": 162,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 103,
+      "cost": 43.6,
+      "expanded_steps": [
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor_zg",
+        "rewrite_lp",
+        "rewrite_c3"
+      ],
+      "expansion": 163,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 103,
+      "cost": 43.6,
+      "expanded_steps": [
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor_zg",
+        "rewrite_lp",
+        "rewrite_c3_lp"
+      ],
+      "expansion": 164,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 103,
+      "cost": 43.6,
+      "expanded_steps": [
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor_zg",
+        "rewrite_lp",
+        "rewrite_p12"
+      ],
+      "expansion": 165,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 103,
+      "cost": 43.6,
+      "expanded_steps": [
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor_zg",
+        "rewrite_lp",
+        "rewrite_p12_lp"
+      ],
+      "expansion": 166,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 103,
+      "cost": 43.6,
+      "expanded_steps": [
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor_zg",
+        "rewrite_lp",
+        "rewrite_p12_lpz"
+      ],
+      "expansion": 167,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 103,
+      "cost": 43.6,
+      "expanded_steps": [
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor_zg",
+        "rewrite_lp",
+        "refactor"
+      ],
+      "expansion": 168,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "elite_prefixes": [
+        [
+          "refactor_lp",
+          "rewrite_lpz",
+          "refactor_zg",
+          "rewrite"
+        ],
+        [
+          "refactor_lp",
+          "rewrite_lpz",
+          "refactor_zg",
+          "rewrite",
+          "balance"
+        ],
+        [
+          "refactor_lp",
+          "rewrite_lpz",
+          "refactor_zg",
+          "rewrite",
+          "rewrite_lp"
+        ],
+        [
+          "refactor_lp",
+          "rewrite_lpz",
+          "refactor_zg",
+          "rewrite",
+          "rewrite_zg"
+        ],
+        [
+          "rewrite_lp",
+          "refactor_lp",
+          "rewrite_lpz",
+          "refactor_zg"
+        ],
+        [
+          "rewrite_lp",
+          "refactor_lp",
+          "rewrite_lpz",
+          "refactor_zg",
+          "balance"
+        ],
+        [
+          "rewrite_lp",
+          "refactor_lp",
+          "rewrite_lpz",
+          "refactor_zg",
+          "rewrite"
+        ],
+        [
+          "rewrite_lp",
+          "refactor_lp",
+          "rewrite_lpz",
+          "refactor_zg",
+          "rewrite_lp"
+        ]
+      ],
+      "expansion": 168,
+      "phase": "elite_injection"
+    },
+    {
+      "area": 103,
+      "cost": 43.6,
+      "expanded_steps": [
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor_zg",
+        "rewrite_lp",
+        "refactor_lp"
+      ],
+      "expansion": 169,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 103,
+      "cost": 43.6,
+      "expanded_steps": [
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor_zg",
+        "rewrite_lp",
+        "refactor_zg"
+      ],
+      "expansion": 170,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 103,
+      "cost": 43.6,
+      "expanded_steps": [
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor_zg",
+        "rewrite_lp",
+        "refactor_lpz"
+      ],
+      "expansion": 171,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 103,
+      "cost": 43.6,
+      "expanded_steps": [
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor_zg",
+        "rewrite_lp",
+        "refactor_i12_c20"
+      ],
+      "expansion": 172,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 103,
+      "cost": 43.6,
+      "expanded_steps": [
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor_zg",
+        "rewrite_lp",
+        "refactor_i12_c20_lp"
+      ],
+      "expansion": 173,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 103,
+      "cost": 43.6,
+      "expanded_steps": [
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor_zg",
+        "rewrite_lp",
+        "refactor_i8_c12"
+      ],
+      "expansion": 174,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 103,
+      "cost": 43.6,
+      "expanded_steps": [
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor_zg",
+        "rewrite_lp",
+        "refactor_i8_c12_lp"
+      ],
+      "expansion": 175,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 103,
+      "cost": 43.6,
+      "expanded_steps": [
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor_zg",
+        "rewrite_lp",
+        "lut_opt"
+      ],
+      "expansion": 176,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 103,
+      "cost": 43.6,
+      "expanded_steps": [
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor_zg",
+        "rewrite_lp",
+        "lut_opt_zg"
+      ],
+      "expansion": 177,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 103,
+      "cost": 43.6,
+      "expanded_steps": [
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor_zg",
+        "rewrite_lp",
+        "lut_opt_c4"
+      ],
+      "expansion": 178,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 103,
+      "cost": 43.6,
+      "expanded_steps": [
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor_zg",
+        "rewrite_lp",
+        "lut_opt_area"
+      ],
+      "expansion": 179,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "area": 103,
+      "cost": 43.6,
+      "expanded_steps": [
+        "refactor_lp",
+        "rewrite_lpz",
+        "refactor_zg",
+        "rewrite_lp",
+        "lut_opt_area_zg"
+      ],
+      "expansion": 180,
+      "logic_depth": 4,
+      "phase": "best_first"
+    },
+    {
+      "elite_prefixes": [
+        [
+          "refactor_lp",
+          "rewrite_lpz",
+          "refactor_zg",
+          "rewrite"
+        ],
+        [
+          "refactor_lp",
+          "rewrite_lpz",
+          "refactor_zg",
+          "rewrite",
+          "balance"
+        ],
+        [
+          "refactor_lp",
+          "rewrite_lpz",
+          "refactor_zg",
+          "rewrite",
+          "rewrite_lp"
+        ],
+        [
+          "refactor_lp",
+          "rewrite_lpz",
+          "refactor_zg",
+          "rewrite",
+          "rewrite_zg"
+        ],
+        [
+          "rewrite_lp",
+          "refactor_lp",
+          "rewrite_lpz",
+          "refactor_zg"
+        ],
+        [
+          "rewrite_lp",
+          "refactor_lp",
+          "rewrite_lpz",
+          "refactor_zg",
+          "balance"
+        ],
+        [
+          "rewrite_lp",
+          "refactor_lp",
+          "rewrite_lpz",
+          "refactor_zg",
+          "rewrite"
+        ],
+        [
+          "rewrite_lp",
+          "refactor_lp",
+          "rewrite_lpz",
+          "refactor_zg",
+          "rewrite_lp"
+        ]
+      ],
+      "expansion": 180,
+      "phase": "elite_injection"
+    },
+    {
+      "kept_prefixes": [
+        {
+          "area": 103,
+          "cost": 43.6,
+          "logic_depth": 4,
+          "steps": [
+            "refactor_lp",
+            "rewrite_lpz",
+            "refactor_zg",
+            "rewrite",
+            "balance"
+          ]
+        },
+        {
+          "area": 103,
+          "cost": 43.6,
+          "logic_depth": 4,
+          "steps": [
+            "refactor_lp",
+            "rewrite_lpz",
+            "refactor_zg",
+            "rewrite",
+            "rewrite_lp"
+          ]
+        },
+        {
+          "area": 103,
+          "cost": 43.6,
+          "logic_depth": 4,
+          "steps": [
+            "refactor_lp",
+            "rewrite_lpz",
+            "refactor_zg",
+            "rewrite",
+            "rewrite_lpz"
+          ]
+        },
+        {
+          "area": 103,
+          "cost": 43.6,
+          "logic_depth": 4,
+          "steps": [
+            "refactor_lp",
+            "rewrite_lpz",
+            "refactor_zg",
+            "rewrite"
+          ]
+        }
+      ],
+      "phase": "tabu_local",
+      "round": 0
+    },
+    {
+      "kept_prefixes": [
+        {
+          "area": 103,
+          "cost": 43.6,
+          "logic_depth": 4,
+          "steps": [
+            "refactor_lp",
+            "rewrite_lpz",
+            "refactor_zg",
+            "rewrite"
+          ]
+        },
+        {
+          "area": 103,
+          "cost": 43.6,
+          "logic_depth": 4,
+          "steps": [
+            "refactor_lp",
+            "rewrite_lpz",
+            "refactor_zg",
+            "rewrite",
+            "balance"
+          ]
+        },
+        {
+          "area": 103,
+          "cost": 43.6,
+          "logic_depth": 4,
+          "steps": [
+            "refactor_lp",
+            "rewrite_lpz",
+            "refactor_zg",
+            "rewrite_lp"
+          ]
+        },
+        {
+          "area": 135,
+          "cost": 55.8,
+          "logic_depth": 3,
+          "steps": [
+            "rewrite_lp",
+            "refactor_lp",
+            "rewrite_lpz",
+            "refactor_zg",
+            "rewrite"
+          ]
+        }
+      ],
+      "phase": "tabu_local",
+      "round": 1
+    }
+  ],
+  "use_history": true
+}

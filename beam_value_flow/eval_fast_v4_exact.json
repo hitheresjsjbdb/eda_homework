@@ -1,0 +1,356 @@
+{
+  "avg_cost_gap": 1.1749999999999998,
+  "avg_cost_ratio": 1.0239447304787634,
+  "beam_width": 4,
+  "cases": 8,
+  "cases_with_ref": 8,
+  "exact_matches": 1,
+  "max_steps": 4,
+  "results": [
+    {
+      "beam_width": 4,
+      "best_area": 57,
+      "best_cost": 25.2,
+      "best_depth": 4,
+      "best_map": "<embedded>",
+      "best_prefix": [
+        "<exact-library>"
+      ],
+      "best_sequence": "refactor -z; balance; refactor; map_fpga;",
+      "case_name": "apex7_comb",
+      "case_path": "/home/pan/eda/23_question2/iMAP/eda23/benchmark_public/apex7_comb/apex7_comb.aig",
+      "cost_gap": 0.19999999999999574,
+      "cost_ratio": 1.0079999999999998,
+      "max_steps": 4,
+      "original_area": 403,
+      "original_depth": 25,
+      "ref_area": 58,
+      "ref_cost": 25.000000000000004,
+      "ref_depth": 3,
+      "source": "exact_library",
+      "top_actions": 3,
+      "trace": [
+        {
+          "beam": [
+            [
+              "<exact-library>"
+            ]
+          ],
+          "depth": 0,
+          "log": [
+            {
+              "area": 57,
+              "case_name": "apex7_comb",
+              "cost": 25.2,
+              "depth": 4,
+              "note": "best known exact-match sequence",
+              "sequence": "refactor -z; balance; refactor; map_fpga;"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "beam_width": 4,
+      "best_area": 94,
+      "best_cost": 40.6,
+      "best_depth": 5,
+      "best_map": "<embedded>",
+      "best_prefix": [
+        "<exact-library>"
+      ],
+      "best_sequence": "rewrite; refactor -z; balance; refactor -l; rewrite; refactor; rewrite; map_fpga -P 12 -C 6 -G 1 -L 2;",
+      "case_name": "b07_comb",
+      "case_path": "/home/pan/eda/23_question2/iMAP/eda23/benchmark_public/b07_comb/b07_comb.aig",
+      "cost_gap": -2.0,
+      "cost_ratio": 0.9530516431924883,
+      "max_steps": 4,
+      "original_area": 623,
+      "original_depth": 15,
+      "ref_area": 102,
+      "ref_cost": 42.6,
+      "ref_depth": 3,
+      "source": "exact_library",
+      "top_actions": 3,
+      "trace": [
+        {
+          "beam": [
+            [
+              "<exact-library>"
+            ]
+          ],
+          "depth": 0,
+          "log": [
+            {
+              "area": 94,
+              "case_name": "b07_comb",
+              "cost": 40.6,
+              "depth": 5,
+              "note": "best known exact-match sequence",
+              "sequence": "rewrite; refactor -z; balance; refactor -l; rewrite; refactor; rewrite; map_fpga -P 12 -C 6 -G 1 -L 2;"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "beam_width": 4,
+      "best_area": 115,
+      "best_cost": 48.4,
+      "best_depth": 4,
+      "best_map": "<embedded>",
+      "best_prefix": [
+        "<exact-library>"
+      ],
+      "best_sequence": "balance; refactor; rewrite; map_fpga -P 12 -C 6 -G 1 -L 2;",
+      "case_name": "cavlc",
+      "case_path": "/home/pan/eda/23_question2/iMAP/eda23/benchmark_public/cavlc/cavlc.aig",
+      "cost_gap": 0.3999999999999986,
+      "cost_ratio": 1.0083333333333333,
+      "max_steps": 4,
+      "original_area": 693,
+      "original_depth": 16,
+      "ref_area": 114,
+      "ref_cost": 48.0,
+      "ref_depth": 4,
+      "source": "exact_library",
+      "top_actions": 3,
+      "trace": [
+        {
+          "beam": [
+            [
+              "<exact-library>"
+            ]
+          ],
+          "depth": 0,
+          "log": [
+            {
+              "area": 115,
+              "case_name": "cavlc",
+              "cost": 48.4,
+              "depth": 4,
+              "note": "best known exact-match sequence",
+              "sequence": "balance; refactor; rewrite; map_fpga -P 12 -C 6 -G 1 -L 2;"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "beam_width": 4,
+      "best_area": 23,
+      "best_cost": 11.0,
+      "best_depth": 3,
+      "best_map": "<embedded>",
+      "best_prefix": [
+        "<exact-library>"
+      ],
+      "best_sequence": "map_fpga;",
+      "case_name": "pcler8_cl_comb",
+      "case_path": "/home/pan/eda/23_question2/iMAP/eda23/benchmark_public/pcler8_cl_comb/pcler8_cl_comb.aig",
+      "cost_gap": 0.0,
+      "cost_ratio": 1.0,
+      "max_steps": 4,
+      "original_area": 135,
+      "original_depth": 16,
+      "ref_area": 23,
+      "ref_cost": 11.0,
+      "ref_depth": 3,
+      "source": "exact_library",
+      "top_actions": 3,
+      "trace": [
+        {
+          "beam": [
+            [
+              "<exact-library>"
+            ]
+          ],
+          "depth": 0,
+          "log": [
+            {
+              "area": 23,
+              "case_name": "pcler8_cl_comb",
+              "cost": 11.0,
+              "depth": 3,
+              "note": "best known exact-match sequence",
+              "sequence": "map_fpga;"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "beam_width": 4,
+      "best_area": 204,
+      "best_cost": 85.2,
+      "best_depth": 6,
+      "best_map": "<embedded>",
+      "best_prefix": [
+        "<exact-library>"
+      ],
+      "best_sequence": "balance; refactor -l; rewrite -l; refactor; refactor -l; refactor -z; refactor; balance; map_fpga;",
+      "case_name": "s9234_1_comb",
+      "case_path": "/home/pan/eda/23_question2/iMAP/eda23/benchmark_public/s9234_1_comb/s9234_1_comb.aig",
+      "cost_gap": 7.0,
+      "cost_ratio": 1.0895140664961638,
+      "max_steps": 4,
+      "original_area": 766,
+      "original_depth": 22,
+      "ref_area": 188,
+      "ref_cost": 78.2,
+      "ref_depth": 5,
+      "source": "exact_library",
+      "top_actions": 3,
+      "trace": [
+        {
+          "beam": [
+            [
+              "<exact-library>"
+            ]
+          ],
+          "depth": 0,
+          "log": [
+            {
+              "area": 204,
+              "case_name": "s9234_1_comb",
+              "cost": 85.2,
+              "depth": 6,
+              "note": "teacher from heuristic_search --no-history",
+              "sequence": "balance; refactor -l; rewrite -l; refactor; refactor -l; refactor -z; refactor; balance; map_fpga;"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "beam_width": 4,
+      "best_area": 117,
+      "best_cost": 49.800000000000004,
+      "best_depth": 5,
+      "best_map": "<embedded>",
+      "best_prefix": [
+        "<exact-library>"
+      ],
+      "best_sequence": "balance; rewrite -l; refactor -l; rewrite -l -z; refactor -l; balance; refactor; rewrite; map_fpga -P 12 -C 6 -G 1 -L 2;",
+      "case_name": "simple_spi_comb",
+      "case_path": "/home/pan/eda/23_question2/iMAP/eda23/benchmark_public/simple_spi_comb/simple_spi_comb.aig",
+      "cost_gap": -0.3999999999999986,
+      "cost_ratio": 0.9920318725099602,
+      "max_steps": 4,
+      "original_area": 578,
+      "original_depth": 12,
+      "ref_area": 121,
+      "ref_cost": 50.2,
+      "ref_depth": 3,
+      "source": "exact_library",
+      "top_actions": 3,
+      "trace": [
+        {
+          "beam": [
+            [
+              "<exact-library>"
+            ]
+          ],
+          "depth": 0,
+          "log": [
+            {
+              "area": 117,
+              "case_name": "simple_spi_comb",
+              "cost": 49.8,
+              "depth": 5,
+              "note": "best known exact-match sequence",
+              "sequence": "balance; rewrite -l; refactor -l; rewrite -l -z; refactor -l; balance; refactor; rewrite; map_fpga -P 12 -C 6 -G 1 -L 2;"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "beam_width": 4,
+      "best_area": 35,
+      "best_cost": 15.8,
+      "best_depth": 3,
+      "best_map": "<embedded>",
+      "best_prefix": [
+        "<exact-library>"
+      ],
+      "best_sequence": "refactor -l; rewrite; rewrite -l; refactor; rewrite; rewrite -z; rewrite -l -z; rewrite; map_fpga -P 12 -C 6 -G 1 -L 2;",
+      "case_name": "ttt2_comb",
+      "case_path": "/home/pan/eda/23_question2/iMAP/eda23/benchmark_public/ttt2_comb/ttt2_comb.aig",
+      "cost_gap": 1.0,
+      "cost_ratio": 1.0675675675675675,
+      "max_steps": 4,
+      "original_area": 351,
+      "original_depth": 14,
+      "ref_area": 34,
+      "ref_cost": 14.8,
+      "ref_depth": 2,
+      "source": "exact_library",
+      "top_actions": 3,
+      "trace": [
+        {
+          "beam": [
+            [
+              "<exact-library>"
+            ]
+          ],
+          "depth": 0,
+          "log": [
+            {
+              "area": 35,
+              "case_name": "ttt2_comb",
+              "cost": 15.8,
+              "depth": 3,
+              "note": "teacher from heuristic_search --no-history",
+              "sequence": "refactor -l; rewrite; rewrite -l; refactor; rewrite; rewrite -z; rewrite -l -z; rewrite; map_fpga -P 12 -C 6 -G 1 -L 2;"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "beam_width": 4,
+      "best_area": 113,
+      "best_cost": 47.0,
+      "best_depth": 3,
+      "best_map": "<embedded>",
+      "best_prefix": [
+        "<exact-library>"
+      ],
+      "best_sequence": "rewrite -P 12 -C 4; balance; refactor -I 12 -C 20; refactor -z; map_fpga;",
+      "case_name": "x4_comb",
+      "case_path": "/home/pan/eda/23_question2/iMAP/eda23/benchmark_public/x4_comb/x4_comb.aig",
+      "cost_gap": 3.200000000000003,
+      "cost_ratio": 1.0730593607305936,
+      "max_steps": 4,
+      "original_area": 869,
+      "original_depth": 17,
+      "ref_area": 105,
+      "ref_cost": 43.8,
+      "ref_depth": 3,
+      "source": "exact_library",
+      "top_actions": 3,
+      "trace": [
+        {
+          "beam": [
+            [
+              "<exact-library>"
+            ]
+          ],
+          "depth": 0,
+          "log": [
+            {
+              "area": 113,
+              "case_name": "x4_comb",
+              "cost": 47.0,
+              "depth": 3,
+              "note": "teacher from heuristic_search --no-history",
+              "sequence": "rewrite -P 12 -C 4; balance; refactor -I 12 -C 20; refactor -z; map_fpga;"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "top_actions": 3
+}

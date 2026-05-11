@@ -1,0 +1,43 @@
+{
+  "best_reg": 0.0001,
+  "best_train_rmse": 0.049569838896478174,
+  "best_val_rmse": 0.16594601006528412,
+  "elapsed_sec": 2.5685954093933105,
+  "feature_dim": 55,
+  "history": [
+    {
+      "reg": 0.0001,
+      "train_rmse": 0.049569838896478174,
+      "val_rmse": 0.16594601006528412
+    },
+    {
+      "reg": 0.001,
+      "train_rmse": 0.049569838943674144,
+      "val_rmse": 0.16594635866420557
+    },
+    {
+      "reg": 0.01,
+      "train_rmse": 0.049569843659473325,
+      "val_rmse": 0.16594984543855867
+    },
+    {
+      "reg": 0.1,
+      "train_rmse": 0.04957031146556129,
+      "val_rmse": 0.16598479663195212
+    },
+    {
+      "reg": 1.0,
+      "train_rmse": 0.04961354562902363,
+      "val_rmse": 0.16634183082310205
+    },
+    {
+      "reg": 10.0,
+      "train_rmse": 0.05183686760619147,
+      "val_rmse": 0.17018377113914637
+    }
+  ],
+  "source_rollouts": "/home/pan/eda/23_question2/beam_value_flow/smoke_rollouts_fast.jsonl",
+  "train_examples": 24,
+  "use_history": true,
+  "val_examples": 11
+}

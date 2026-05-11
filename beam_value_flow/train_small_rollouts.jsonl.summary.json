@@ -1,0 +1,12 @@
+{
+  "cases": 15,
+  "elapsed_sec": 96.93353486061096,
+  "exhaustive_depth": 1,
+  "input_root": "/home/pan/eda/23_question2/beam_value_flow/train_small_cases",
+  "max_steps": 3,
+  "output_jsonl": "/home/pan/eda/23_question2/beam_value_flow/train_small_rollouts.jsonl",
+  "random_samples": 4,
+  "records": 750,
+  "strategy": "hybrid",
+  "use_history": true
+}

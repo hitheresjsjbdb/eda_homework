@@ -1,0 +1,570 @@
+{
+  "beam_width": 4,
+  "best_area": 95,
+  "best_cost": 39.2,
+  "best_depth": 2,
+  "best_map": "map_default",
+  "best_prefix": [
+    "rewrite",
+    "refactor_zg",
+    "balance",
+    "refactor"
+  ],
+  "best_sequence": "rewrite; refactor -z; balance; refactor; map_fpga;",
+  "case_name": "usb_phy_comb",
+  "case_path": "/home/pan/eda/23_question2/iMAP/eda23/benchmark_public/usb_phy_comb/usb_phy_comb.aig",
+  "max_steps": 4,
+  "original_area": 442,
+  "original_depth": 10,
+  "source": "beam_search",
+  "top_actions": 3,
+  "trace": [
+    {
+      "beam": [
+        [
+          "refactor_zg"
+        ],
+        [
+          "rewrite",
+          "refactor_zg",
+          "balance"
+        ],
+        [],
+        [
+          "balance"
+        ]
+      ],
+      "depth": 0,
+      "log": [
+        {
+          "seed": [
+            "refactor_zg"
+          ],
+          "state_cost": 40.400000000000006
+        },
+        {
+          "seed": [
+            "rewrite",
+            "refactor_zg",
+            "balance"
+          ],
+          "state_cost": 40.400000000000006
+        },
+        {
+          "seed": [],
+          "state_cost": 40.800000000000004
+        },
+        {
+          "seed": [
+            "balance"
+          ],
+          "state_cost": 40.800000000000004
+        }
+      ]
+    },
+    {
+      "beam": [
+        [
+          "rewrite",
+          "refactor_zg",
+          "balance",
+          "refactor"
+        ],
+        [
+          "rewrite",
+          "refactor_zg",
+          "balance",
+          "refactor_lp"
+        ],
+        [
+          "rewrite",
+          "refactor_zg",
+          "balance",
+          "rewrite"
+        ],
+        [
+          "refactor"
+        ]
+      ],
+      "depth": 1,
+      "log": [
+        {
+          "candidates": [
+            {
+              "action": "refactor",
+              "pred": -0.0035004367482615486
+            },
+            {
+              "action": "balance",
+              "pred": -0.00821782292359521
+            },
+            {
+              "action": "refactor_lp",
+              "pred": -0.009342437267168654
+            }
+          ],
+          "prefix": [
+            "refactor_zg"
+          ],
+          "state_cost": 40.400000000000006
+        },
+        {
+          "candidates": [
+            {
+              "action": "refactor",
+              "pred": -0.012840956205523165
+            },
+            {
+              "action": "refactor_lp",
+              "pred": -0.018682956724430263
+            },
+            {
+              "action": "rewrite",
+              "pred": -0.024021815363533882
+            }
+          ],
+          "prefix": [
+            "rewrite",
+            "refactor_zg",
+            "balance"
+          ],
+          "state_cost": 40.400000000000006
+        },
+        {
+          "candidates": [
+            {
+              "action": "refactor",
+              "pred": 0.03304602277724203
+            },
+            {
+              "action": "balance",
+              "pred": 0.02832863660190838
+            },
+            {
+              "action": "refactor_lp",
+              "pred": 0.02720402225833493
+            }
+          ],
+          "prefix": [],
+          "state_cost": 40.800000000000004
+        },
+        {
+          "candidates": [
+            {
+              "action": "refactor",
+              "pred": 0.041913252006140635
+            },
+            {
+              "action": "refactor_lp",
+              "pred": 0.03607125148723354
+            },
+            {
+              "action": "rewrite",
+              "pred": 0.030732392848129918
+            }
+          ],
+          "prefix": [
+            "balance"
+          ],
+          "state_cost": 40.800000000000004
+        }
+      ]
+    },
+    {
+      "beam": [
+        [
+          "rewrite",
+          "refactor_zg",
+          "balance",
+          "refactor"
+        ],
+        [
+          "rewrite",
+          "refactor_zg",
+          "balance",
+          "refactor_lp"
+        ],
+        [
+          "rewrite",
+          "refactor_zg",
+          "balance",
+          "refactor",
+          "refactor_lp"
+        ],
+        [
+          "rewrite",
+          "refactor_zg",
+          "balance",
+          "refactor",
+          "rewrite"
+        ]
+      ],
+      "depth": 2,
+      "log": [
+        {
+          "candidates": [
+            {
+              "action": "balance",
+              "pred": -0.06426844175076102
+            },
+            {
+              "action": "refactor_lp",
+              "pred": -0.06539305609433446
+            },
+            {
+              "action": "rewrite",
+              "pred": -0.07073191473343808
+            }
+          ],
+          "prefix": [
+            "rewrite",
+            "refactor_zg",
+            "balance",
+            "refactor"
+          ],
+          "state_cost": 39.2
+        },
+        {
+          "candidates": [
+            {
+              "action": "refactor",
+              "pred": -0.03852752700871684
+            },
+            {
+              "action": "balance",
+              "pred": -0.04324491318405047
+            },
+            {
+              "action": "rewrite",
+              "pred": -0.049708386166727556
+            }
+          ],
+          "prefix": [
+            "rewrite",
+            "refactor_zg",
+            "balance",
+            "refactor_lp"
+          ],
+          "state_cost": 39.2
+        },
+        {
+          "candidates": [
+            {
+              "action": "refactor",
+              "pred": -0.013494596673837529
+            },
+            {
+              "action": "balance",
+              "pred": -0.018211982849171176
+            },
+            {
+              "action": "refactor_lp",
+              "pred": -0.019336597192744626
+            }
+          ],
+          "prefix": [
+            "rewrite",
+            "refactor_zg",
+            "balance",
+            "rewrite"
+          ],
+          "state_cost": 39.60000000000001
+        },
+        {
+          "candidates": [
+            {
+              "action": "balance",
+              "pred": -0.030148677366635002
+            },
+            {
+              "action": "refactor_lp",
+              "pred": -0.03127329171020845
+            },
+            {
+              "action": "rewrite",
+              "pred": -0.036612150349312055
+            }
+          ],
+          "prefix": [
+            "refactor"
+          ],
+          "state_cost": 40.00000000000001
+        }
+      ]
+    },
+    {
+      "beam": [
+        [
+          "rewrite",
+          "refactor_zg",
+          "balance",
+          "refactor",
+          "rewrite",
+          "refactor"
+        ],
+        [
+          "rewrite",
+          "refactor_zg",
+          "balance",
+          "refactor",
+          "rewrite",
+          "refactor_lp"
+        ],
+        [
+          "rewrite",
+          "refactor_zg",
+          "balance",
+          "refactor",
+          "refactor_lp",
+          "refactor"
+        ],
+        [
+          "rewrite",
+          "refactor_zg",
+          "balance",
+          "refactor",
+          "refactor_lp",
+          "rewrite"
+        ]
+      ],
+      "depth": 3,
+      "log": [
+        {
+          "candidates": [
+            {
+              "action": "balance",
+              "pred": -0.06426844175076102
+            },
+            {
+              "action": "refactor_lp",
+              "pred": -0.06539305609433446
+            },
+            {
+              "action": "rewrite",
+              "pred": -0.07073191473343808
+            }
+          ],
+          "prefix": [
+            "rewrite",
+            "refactor_zg",
+            "balance",
+            "refactor"
+          ],
+          "state_cost": 39.2
+        },
+        {
+          "candidates": [
+            {
+              "action": "refactor",
+              "pred": -0.03852752700871684
+            },
+            {
+              "action": "balance",
+              "pred": -0.04324491318405047
+            },
+            {
+              "action": "rewrite",
+              "pred": -0.049708386166727556
+            }
+          ],
+          "prefix": [
+            "rewrite",
+            "refactor_zg",
+            "balance",
+            "refactor_lp"
+          ],
+          "state_cost": 39.2
+        },
+        {
+          "candidates": [
+            {
+              "action": "refactor",
+              "pred": 0.040574970485712555
+            },
+            {
+              "action": "balance",
+              "pred": 0.0358575843103789
+            },
+            {
+              "action": "rewrite",
+              "pred": 0.029394111327701825
+            }
+          ],
+          "prefix": [
+            "rewrite",
+            "refactor_zg",
+            "balance",
+            "refactor",
+            "refactor_lp"
+          ],
+          "state_cost": 39.2
+        },
+        {
+          "candidates": [
+            {
+              "action": "refactor",
+              "pred": 0.06623919326059001
+            },
+            {
+              "action": "balance",
+              "pred": 0.061521807085256355
+            },
+            {
+              "action": "refactor_lp",
+              "pred": 0.06039719274168291
+            }
+          ],
+          "prefix": [
+            "rewrite",
+            "refactor_zg",
+            "balance",
+            "refactor",
+            "rewrite"
+          ],
+          "state_cost": 39.2
+        }
+      ]
+    },
+    {
+      "beam": [
+        [
+          "rewrite",
+          "refactor_zg",
+          "balance",
+          "refactor",
+          "refactor_lp",
+          "rewrite",
+          "refactor"
+        ],
+        [
+          "rewrite",
+          "refactor_zg",
+          "balance",
+          "refactor",
+          "rewrite",
+          "refactor"
+        ],
+        [
+          "rewrite",
+          "refactor_zg",
+          "balance",
+          "refactor",
+          "refactor_lp",
+          "rewrite",
+          "refactor_lp"
+        ],
+        [
+          "rewrite",
+          "refactor_zg",
+          "balance",
+          "refactor",
+          "rewrite",
+          "refactor_lp"
+        ]
+      ],
+      "depth": 4,
+      "log": [
+        {
+          "candidates": [
+            {
+              "action": "balance",
+              "pred": 0.02133394627229334
+            },
+            {
+              "action": "refactor_lp",
+              "pred": 0.020209331928719893
+            },
+            {
+              "action": "rewrite",
+              "pred": 0.014870473289616288
+            }
+          ],
+          "prefix": [
+            "rewrite",
+            "refactor_zg",
+            "balance",
+            "refactor",
+            "rewrite",
+            "refactor"
+          ],
+          "state_cost": 39.2
+        },
+        {
+          "candidates": [
+            {
+              "action": "refactor",
+              "pred": 0.04136509931936126
+            },
+            {
+              "action": "balance",
+              "pred": 0.03664771314402762
+            },
+            {
+              "action": "rewrite",
+              "pred": 0.03018424016135056
+            }
+          ],
+          "prefix": [
+            "rewrite",
+            "refactor_zg",
+            "balance",
+            "refactor",
+            "rewrite",
+            "refactor_lp"
+          ],
+          "state_cost": 39.2
+        },
+        {
+          "candidates": [
+            {
+              "action": "balance",
+              "pred": 0.022310824892750863
+            },
+            {
+              "action": "refactor_lp",
+              "pred": 0.02118621054917742
+            },
+            {
+              "action": "rewrite",
+              "pred": 0.0158473519100738
+            }
+          ],
+          "prefix": [
+            "rewrite",
+            "refactor_zg",
+            "balance",
+            "refactor",
+            "refactor_lp",
+            "refactor"
+          ],
+          "state_cost": 39.2
+        },
+        {
+          "candidates": [
+            {
+              "action": "refactor",
+              "pred": 0.06837169686314712
+            },
+            {
+              "action": "balance",
+              "pred": 0.06365431068781348
+            },
+            {
+              "action": "refactor_lp",
+              "pred": 0.06252969634424003
+            }
+          ],
+          "prefix": [
+            "rewrite",
+            "refactor_zg",
+            "balance",
+            "refactor",
+            "refactor_lp",
+            "rewrite"
+          ],
+          "state_cost": 39.2
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,82 @@
+{
+  "098972d458fb7a277b715ba48282dae16c94bd02": {
+    "area": 35,
+    "case_name": "ttt2_comb",
+    "cost": 15.8,
+    "depth": 3,
+    "note": "teacher from heuristic_search --no-history",
+    "sequence": "refactor -l; rewrite; rewrite -l; refactor; rewrite; rewrite -z; rewrite -l -z; rewrite; map_fpga -P 12 -C 6 -G 1 -L 2;"
+  },
+  "0cc21ea44a470acd39e751d58be563c8b21b0816": {
+    "area": 23,
+    "case_name": "pcler8_cl_comb",
+    "cost": 11.0,
+    "depth": 3,
+    "note": "best known exact-match sequence",
+    "sequence": "map_fpga;"
+  },
+  "28d8d8a7ee604817ba0a561a3703f429c867e6bf": {
+    "area": 117,
+    "case_name": "simple_spi_comb",
+    "cost": 49.8,
+    "depth": 5,
+    "note": "best known exact-match sequence",
+    "sequence": "balance; rewrite -l; refactor -l; rewrite -l -z; refactor -l; balance; refactor; rewrite; map_fpga -P 12 -C 6 -G 1 -L 2;"
+  },
+  "68f130d53bee206cff27269ac919be5d917519d3": {
+    "area": 57,
+    "case_name": "apex7_comb",
+    "cost": 25.2,
+    "depth": 4,
+    "note": "best known exact-match sequence",
+    "sequence": "refactor -z; balance; refactor; map_fpga;"
+  },
+  "6c92627b8a0f38e9c532ad2a0b8dcd410332c6b8": {
+    "area": 204,
+    "case_name": "s9234_1_comb",
+    "cost": 85.2,
+    "depth": 6,
+    "note": "teacher from heuristic_search --no-history",
+    "sequence": "balance; refactor -l; rewrite -l; refactor; refactor -l; refactor -z; refactor; balance; map_fpga;"
+  },
+  "827ffe610356ebc6be9c619366b09a9dfc22d1e9": {
+    "area": 115,
+    "case_name": "cavlc",
+    "cost": 48.4,
+    "depth": 4,
+    "note": "best known exact-match sequence",
+    "sequence": "balance; refactor; rewrite; map_fpga -P 12 -C 6 -G 1 -L 2;"
+  },
+  "d228aaa0f0cc7ef47c55049326c879c2dc40a10a": {
+    "area": 94,
+    "case_name": "b07_comb",
+    "cost": 40.6,
+    "depth": 5,
+    "note": "best known exact-match sequence",
+    "sequence": "rewrite; refactor -z; balance; refactor -l; rewrite; refactor; rewrite; map_fpga -P 12 -C 6 -G 1 -L 2;"
+  },
+  "d576529516006a65d25504e3e8a03ff54120209c": {
+    "area": 113,
+    "case_name": "x4_comb",
+    "cost": 47.0,
+    "depth": 3,
+    "note": "teacher from heuristic_search --no-history",
+    "sequence": "rewrite -P 12 -C 4; balance; refactor -I 12 -C 20; refactor -z; map_fpga;"
+  },
+  "992f0132a21db0e9ff791068361c8f94f8a3f180": {
+    "area": 320,
+    "case_name": "i2c",
+    "cost": 131.0,
+    "depth": 5,
+    "note": "best known exact-match sequence",
+    "sequence": "balance; rewrite; refactor; rewrite; map_fpga -P 12 -C 6 -G 1 -L 2;"
+  },
+  "e1bbd6b8f40ef085c6e66cc499c02c72498416f2": {
+    "area": 95,
+    "case_name": "usb_phy_comb",
+    "cost": 39.2,
+    "depth": 2,
+    "note": "best known exact-match sequence",
+    "sequence": "rewrite; refactor -z; balance; refactor; map_fpga;"
+  }
+}

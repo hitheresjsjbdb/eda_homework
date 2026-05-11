@@ -1,0 +1,1 @@
+history -c; history -a; refactor -z; history -a; refactor -l; history -a; map_fpga -t 1;

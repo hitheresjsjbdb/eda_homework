@@ -1,0 +1,12 @@
+{
+  "cases": 3,
+  "elapsed_sec": 470.0205101966858,
+  "exhaustive_depth": 2,
+  "input_root": "/home/pan/eda/23_question2/beam_value_flow/smoke_cases",
+  "max_steps": 3,
+  "output_jsonl": "/home/pan/eda/23_question2/beam_value_flow/smoke_rollouts.jsonl",
+  "random_samples": 6,
+  "records": 1602,
+  "strategy": "hybrid",
+  "use_history": true
+}

@@ -1,0 +1,1 @@
+balance; rewrite; refactor; rewrite; map_fpga -P 12 -C 6 -G 1 -L 2;
