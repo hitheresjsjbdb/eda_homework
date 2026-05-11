@@ -33,6 +33,12 @@ class EpisodeResult:
 
 
 @dataclass
+class DecisionPoint:
+    obs: np.ndarray
+    action_scores: list[tuple[int, float]]
+
+
+@dataclass
 class BeamNode:
     state: SearchState
     done: bool
@@ -49,6 +55,7 @@ class PendingExpansion:
     probs: torch.Tensor
     entropy: float
     action_idx: int
+    group_id: int
 
 
 def load_policy_checkpoint(path: Path, device: torch.device) -> tuple[PolicyValueNet, dict]:
@@ -122,6 +129,7 @@ def sample_episode(
         final_depth=int(final_info["depth"]),
         final_sequence=str(final_info["sequence"]),
         final_return=_normalized_return(env, final_cost),
+        done_reason=str(final_info.get("done_reason")),
     )
 
 
@@ -173,7 +181,7 @@ def search_candidates(
     random_mix_prob: float = 0.0,
     expand_workers: int = 1,
     reset_env: bool = True,
-) -> list[EpisodeResult]:
+) -> tuple[list[EpisodeResult], list[DecisionPoint]]:
     if reset_env or env.current_state is None:
         env.reset()
     initial_state = env.get_state()
@@ -195,16 +203,25 @@ def search_candidates(
         )
     ]
     terminal_nodes: list[BeamNode] = []
+    decision_points: list[DecisionPoint] = []
 
     for _ in range(env.max_steps):
         expanded: list[BeamNode] = []
         pending: list[PendingExpansion] = []
+        decision_groups: list[dict[str, object]] = []
         for node in beam:
             if node.done:
                 terminal_nodes.append(node)
                 continue
 
             node_obs = env.observe_state(node.state)
+            group_id = len(decision_groups)
+            decision_groups.append(
+                {
+                    "obs": np.array(node_obs, copy=True),
+                    "action_scores": [],
+                }
+            )
             logits, _value = policy_logits_value(model, node_obs, device)
             probs = torch.softmax(logits / max(1e-3, temperature), dim=0)
             entropy = float((-(probs * torch.log(probs.clamp_min(1e-12))).sum()).item())
@@ -224,6 +241,7 @@ def search_candidates(
                         probs=probs,
                         entropy=entropy,
                         action_idx=int(action_idx),
+                        group_id=group_id,
                     )
                 )
 
@@ -252,6 +270,7 @@ def search_candidates(
                 _next_logits, next_value = policy_logits_value(model, next_obs, device)
                 predicted = next_value
                 rank_return = _normalized_return(env, next_state.snapshot.cost)
+            decision_groups[item.group_id]["action_scores"].append((int(item.action_idx), rank_return))
 
             step = TrajectoryStep(
                 obs=item.node_obs,
@@ -273,6 +292,23 @@ def search_candidates(
                 terminal_nodes.append(child)
             else:
                 expanded.append(child)
+
+        for group in decision_groups:
+            grouped_scores: dict[int, list[float]] = {}
+            for action_idx, score in group["action_scores"]:
+                grouped_scores.setdefault(int(action_idx), []).append(float(score))
+            if len(grouped_scores) < 2:
+                continue
+            action_scores = [
+                (action_idx, max(scores))
+                for action_idx, scores in grouped_scores.items()
+            ]
+            decision_points.append(
+                DecisionPoint(
+                    obs=np.array(group["obs"], copy=True),
+                    action_scores=action_scores,
+                )
+            )
 
         expanded.sort(key=lambda item: item.score, reverse=True)
         beam = expanded[:beam_width]
@@ -299,7 +335,7 @@ def search_candidates(
                 done_reason=str(node.final_info.get("done_reason")),
             )
         )
-    return results
+    return results, decision_points
 
 
 def beam_search(
@@ -358,6 +394,7 @@ def beam_search(
                         probs=probs,
                         entropy=0.0,
                         action_idx=int(action_idx),
+                        group_id=0,
                     )
                 )
 

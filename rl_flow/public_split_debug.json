@@ -1,1 +1,15 @@
-ok
+{
+  "train": [
+    "b03_comb",
+    "s526_comb"
+  ],
+  "eval": [
+    "int2float"
+  ],
+  "test": [
+    "mux_cl_comb"
+  ],
+  "meta": {
+    "note": "Small smoke-test split for fast RL training checks."
+  }
+}

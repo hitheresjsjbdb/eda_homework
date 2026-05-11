@@ -51,6 +51,30 @@ _EVAL_TEMPERATURE = 1.0
 _EVAL_EXPAND_WORKERS = 1
 
 
+def _group_training_episodes(
+    episodes: list[dict],
+    archive: dict[str, dict],
+) -> dict[str, list[dict]]:
+    grouped: dict[str, list[dict]] = defaultdict(list)
+    for episode in episodes:
+        grouped[str(episode["case_name"])].append(episode)
+    for case_name, item in archive.items():
+        if item.get("steps"):
+            grouped[str(case_name)].append(item)
+    return grouped
+
+
+def _state_key(case_name: str, obs: np.ndarray) -> tuple[str, bytes]:
+    return case_name, np.asarray(obs, dtype=np.float32).tobytes()
+
+
+def _selected_bucket_counts(bucket_rows: list[str], selected: list[int]) -> dict[str, int]:
+    counts = {"small": 0, "medium": 0, "large": 0}
+    for idx in selected:
+        counts[bucket_rows[idx]] += 1
+    return counts
+
+
 def build_policy_dataset(
     episodes: list[dict],
     archive: dict[str, dict],
@@ -61,13 +85,8 @@ def build_policy_dataset(
     balance_mode: str,
     weight_min: float,
     weight_max: float,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor] | None:
-    grouped: dict[str, list[dict]] = defaultdict(list)
-    for episode in episodes:
-        grouped[str(episode["case_name"])].append(episode)
-    for case_name, item in archive.items():
-        if item.get("steps"):
-            grouped[str(case_name)].append(item)
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, dict[str, int]] | None:
+    grouped = _group_training_episodes(episodes, archive)
 
     obs_rows: list[np.ndarray] = []
     action_rows: list[int] = []
@@ -78,7 +97,8 @@ def build_policy_dataset(
         ranked = sorted(case_episodes, key=lambda item: float(item["final_return"]), reverse=True)
         for episode in ranked[:topk_per_case]:
             init_cost = float(episode.get("initial_cost", episode["cost"]))
-            weight = case_weight(init_cost, min_weight=weight_min, max_weight=weight_max)
+            quality_scale = 1.0 + max(0.0, float(episode["final_return"])) * 4.0
+            weight = case_weight(init_cost, min_weight=weight_min, max_weight=weight_max) * quality_scale
             bucket = case_bucket(init_cost, small_threshold=small_threshold, large_threshold=large_threshold)
             for step in episode["steps"]:
                 obs_rows.append(np.array(step.obs, copy=True))
@@ -93,11 +113,61 @@ def build_policy_dataset(
     obs = torch.tensor(np.stack([obs_rows[i] for i in selected], axis=0), dtype=torch.float32)
     actions = torch.tensor([action_rows[i] for i in selected], dtype=torch.int64)
     weights = torch.tensor([weight_rows[i] for i in selected], dtype=torch.float32)
-    return obs, actions, weights
+    return obs, actions, weights, _selected_bucket_counts(bucket_rows, selected)
 
 
-def build_pairwise_ranking_dataset(
+def build_value_dataset(
     episodes: list[dict],
+    archive: dict[str, dict],
+    rng: random.Random,
+    small_threshold: float,
+    large_threshold: float,
+    balance_mode: str,
+    weight_min: float,
+    weight_max: float,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, dict[str, int]] | None:
+    grouped = _group_training_episodes(episodes, archive)
+    state_values: dict[tuple[str, bytes], dict[str, object]] = {}
+    for case_name, case_episodes in grouped.items():
+        for episode in case_episodes:
+            init_cost = float(episode.get("initial_cost", episode["cost"]))
+            final_return = float(episode["final_return"])
+            bucket = case_bucket(init_cost, small_threshold=small_threshold, large_threshold=large_threshold)
+            weight = case_weight(init_cost, min_weight=weight_min, max_weight=weight_max)
+            for step in episode["steps"]:
+                obs = np.array(step.obs, copy=True)
+                key = _state_key(case_name, obs)
+                existing = state_values.get(key)
+                if existing is None or final_return > float(existing["target"]):
+                    state_values[key] = {
+                        "obs": obs,
+                        "target": final_return,
+                        "weight": weight,
+                        "bucket": bucket,
+                    }
+
+    if not state_values:
+        return None
+
+    obs_rows: list[np.ndarray] = []
+    target_rows: list[float] = []
+    weight_rows: list[float] = []
+    bucket_rows: list[str] = []
+    for item in state_values.values():
+        obs_rows.append(np.array(item["obs"], copy=True))
+        target_rows.append(float(item["target"]))
+        weight_rows.append(float(item["weight"]))
+        bucket_rows.append(str(item["bucket"]))
+
+    selected = rebalance_indices(bucket_rows, rng, balance_mode)
+    obs = torch.tensor(np.stack([obs_rows[i] for i in selected], axis=0), dtype=torch.float32)
+    targets = torch.tensor([target_rows[i] for i in selected], dtype=torch.float32)
+    weights = torch.tensor([weight_rows[i] for i in selected], dtype=torch.float32)
+    return obs, targets, weights, _selected_bucket_counts(bucket_rows, selected)
+
+
+def build_action_ranking_dataset(
+    decisions: list[dict],
     min_return_gap: float,
     max_pairs_per_bucket: int,
     rng: random.Random,
@@ -106,37 +176,37 @@ def build_pairwise_ranking_dataset(
     balance_mode: str,
     weight_min: float,
     weight_max: float,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor] | None:
-    buckets: dict[tuple[str, int], list[tuple[np.ndarray, float]]] = defaultdict(list)
-    case_initial_cost: dict[str, float] = {}
-    for episode in episodes:
-        final_return = float(episode["final_return"])
-        case_name = str(episode["case_name"])
-        case_initial_cost[case_name] = float(episode.get("initial_cost", episode["cost"]))
-        for step_index, step in enumerate(episode["steps"]):
-            buckets[(case_name, step_index)].append((np.array(step.obs, copy=True), final_return))
-
-    better_rows: list[np.ndarray] = []
-    worse_rows: list[np.ndarray] = []
-    weight_rows: list[float] = []
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, dict[str, int]] | None:
+    obs_rows: list[np.ndarray] = []
+    better_action_rows: list[int] = []
+    worse_action_rows: list[int] = []
+    pair_weight_rows: list[float] = []
     bucket_rows: list[str] = []
-    for (case_name, _step_index), bucket_items in buckets.items():
-        if len(bucket_items) < 2:
+    for item in decisions:
+        init_cost = float(item["initial_cost"])
+        scored_actions = [(int(action), float(score)) for action, score in item["action_scores"]]
+        if len(scored_actions) < 2:
             continue
-        ranked = sorted(bucket_items, key=lambda item: item[1], reverse=True)
-        init_cost = case_initial_cost.get(case_name, 1.0)
-        pair_weight = case_weight(init_cost, min_weight=weight_min, max_weight=weight_max)
-        pair_bucket = case_bucket(init_cost, small_threshold=small_threshold, large_threshold=large_threshold)
+        ranked = sorted(scored_actions, key=lambda value: value[1], reverse=True)
+        pair_bucket = case_bucket(
+            init_cost,
+            small_threshold=small_threshold,
+            large_threshold=large_threshold,
+        )
+        pair_base_weight = case_weight(init_cost, min_weight=weight_min, max_weight=weight_max)
         pair_count = 0
         for better_idx in range(len(ranked)):
             for worse_idx in range(better_idx + 1, len(ranked)):
-                better_obs, better_return = ranked[better_idx]
-                worse_obs, worse_return = ranked[worse_idx]
-                if better_return - worse_return < min_return_gap:
+                better_action, better_return = ranked[better_idx]
+                worse_action, worse_return = ranked[worse_idx]
+                gap = better_return - worse_return
+                if gap < min_return_gap:
                     continue
-                better_rows.append(better_obs)
-                worse_rows.append(worse_obs)
-                weight_rows.append(pair_weight)
+                pair_weight = pair_base_weight * min(4.0, 1.0 + gap / max(min_return_gap, 1e-6))
+                obs_rows.append(np.array(item["obs"], copy=True))
+                better_action_rows.append(better_action)
+                worse_action_rows.append(worse_action)
+                pair_weight_rows.append(pair_weight)
                 bucket_rows.append(pair_bucket)
                 pair_count += 1
                 if pair_count >= max_pairs_per_bucket:
@@ -144,14 +214,15 @@ def build_pairwise_ranking_dataset(
             if pair_count >= max_pairs_per_bucket:
                 break
 
-    if not better_rows:
+    if not obs_rows:
         return None
 
     selected = rebalance_indices(bucket_rows, rng, balance_mode)
-    better = torch.tensor(np.stack([better_rows[i] for i in selected], axis=0), dtype=torch.float32)
-    worse = torch.tensor(np.stack([worse_rows[i] for i in selected], axis=0), dtype=torch.float32)
-    weights = torch.tensor([weight_rows[i] for i in selected], dtype=torch.float32)
-    return better, worse, weights
+    obs = torch.tensor(np.stack([obs_rows[i] for i in selected], axis=0), dtype=torch.float32)
+    better_actions = torch.tensor([better_action_rows[i] for i in selected], dtype=torch.int64)
+    worse_actions = torch.tensor([worse_action_rows[i] for i in selected], dtype=torch.int64)
+    weights = torch.tensor([pair_weight_rows[i] for i in selected], dtype=torch.float32)
+    return obs, better_actions, worse_actions, weights, _selected_bucket_counts(bucket_rows, selected)
 
 
 def rebalance_indices(bucket_rows: list[str], rng: random.Random, balance_mode: str) -> list[int]:
@@ -264,7 +335,7 @@ def _init_sample_worker(
     _SAMPLER_EXPAND_WORKERS = expand_workers
 
 
-def _sample_case_worker(case_name: str, episodes_per_case: int, seed: int) -> list[dict]:
+def _sample_case_worker(case_name: str, episodes_per_case: int, seed: int) -> dict[str, list[dict]]:
     if _SAMPLER_MODEL is None or _SAMPLER_CASE_ROOT is None or _SAMPLER_IMAP_BIN is None:
         raise RuntimeError("sample worker not initialized")
 
@@ -289,8 +360,9 @@ def _sample_case_worker(case_name: str, episodes_per_case: int, seed: int) -> li
     )
     env.max_steps = max_steps
 
-    records = []
-    candidates = search_candidates(
+    records: list[dict] = []
+    decision_records: list[dict] = []
+    candidates, decisions = search_candidates(
         env=env,
         model=_SAMPLER_MODEL,
         device=torch.device("cpu"),
@@ -318,7 +390,16 @@ def _sample_case_worker(case_name: str, episodes_per_case: int, seed: int) -> li
                 "done_reason": episode.done_reason,
             }
         )
-    return records
+    for decision in decisions:
+        decision_records.append(
+            {
+                "case_name": case_name,
+                "initial_cost": init_cost,
+                "obs": np.array(decision.obs, copy=True),
+                "action_scores": [(int(action), float(score)) for action, score in decision.action_scores],
+            }
+        )
+    return {"episodes": records, "decisions": decision_records}
 
 
 def _init_eval_worker(
@@ -421,9 +502,10 @@ def collect_episodes_parallel(
     gumbel_scale: float,
     random_mix_prob: float,
     expand_workers: int,
-) -> list[dict]:
+) -> tuple[list[dict], list[dict]]:
     ctx = mp.get_context("fork")
     collected: list[dict] = []
+    decisions: list[dict] = []
     with ProcessPoolExecutor(
         max_workers=num_workers,
         mp_context=ctx,
@@ -460,10 +542,12 @@ def collect_episodes_parallel(
             unit="case",
         ):
             try:
-                collected.extend(future.result())
+                result = future.result()
+                collected.extend(result["episodes"])
+                decisions.extend(result["decisions"])
             except Exception as exc:
                 print(f"collect worker failed: {exc}")
-    return collected
+    return collected, decisions
 
 
 def evaluate_split(
@@ -686,7 +770,8 @@ def main() -> int:
     parser.add_argument("--update-epochs", type=int, default=6)
     parser.add_argument("--lr", type=float, default=3e-4)
     parser.add_argument("--ranking-coef", type=float, default=1.0)
-    parser.add_argument("--imitation-coef", type=float, default=1.0)
+    parser.add_argument("--value-coef", type=float, default=1.0)
+    parser.add_argument("--imitation-coef", type=float, default=0.4)
     parser.add_argument("--ranking-margin", type=float, default=0.05)
     parser.add_argument("--min-return-gap", type=float, default=0.01)
     parser.add_argument("--max-pairs-per-bucket", type=int, default=8)
@@ -762,7 +847,7 @@ def main() -> int:
         )
         try:
             if num_workers > 1 and len(train_cases) > 1:
-                collected = collect_episodes_parallel(
+                collected, collected_decisions = collect_episodes_parallel(
                     case_names=train_cases,
                     checkpoint_path=sampling_ckpt,
                     case_root=args.case_root,
@@ -781,6 +866,7 @@ def main() -> int:
                 )
             else:
                 collected = []
+                collected_decisions = []
                 for case_index, case_name in enumerate(
                     progress_iter(train_cases, desc=f"collect epoch {epoch}", unit="case")
                 ):
@@ -804,7 +890,7 @@ def main() -> int:
                     )
                     env.max_steps = max_steps
                     local_rng = random.Random(args.seed + epoch * 1000003 + case_index * 100003)
-                    candidates = search_candidates(
+                    candidates, decisions = search_candidates(
                         env=env,
                         model=model,
                         device=device,
@@ -832,6 +918,15 @@ def main() -> int:
                                 "done_reason": episode.done_reason,
                             }
                         )
+                    for decision in decisions:
+                        collected_decisions.append(
+                            {
+                                "case_name": case_name,
+                                "initial_cost": init_cost,
+                                "obs": np.array(decision.obs, copy=True),
+                                "action_scores": [(int(action), float(score)) for action, score in decision.action_scores],
+                            }
+                        )
         finally:
             if sampling_ckpt.exists():
                 sampling_ckpt.unlink()
@@ -856,8 +951,18 @@ def main() -> int:
             weight_min=args.case_weight_min,
             weight_max=args.case_weight_max,
         )
-        ranking_dataset = build_pairwise_ranking_dataset(
+        value_dataset = build_value_dataset(
             episodes=collected,
+            archive=archive,
+            rng=rng,
+            small_threshold=args.small_cost_threshold,
+            large_threshold=args.large_cost_threshold,
+            balance_mode=args.bucket_balance_mode,
+            weight_min=args.case_weight_min,
+            weight_max=args.case_weight_max,
+        )
+        ranking_dataset = build_action_ranking_dataset(
+            decisions=collected_decisions,
             min_return_gap=args.min_return_gap,
             max_pairs_per_bucket=args.max_pairs_per_bucket,
             rng=rng,
@@ -871,36 +976,72 @@ def main() -> int:
         model.train()
         update_losses = []
         ranking_loss_value = 0.0
+        value_loss_value = 0.0
         imitation_loss_value = 0.0
+        policy_bucket_counts = {"small": 0, "medium": 0, "large": 0}
+        value_bucket_counts = {"small": 0, "medium": 0, "large": 0}
+        ranking_bucket_counts = {"small": 0, "medium": 0, "large": 0}
 
         policy_obs = None
         policy_actions = None
         policy_weights = None
         if policy_dataset is not None:
-            policy_obs, policy_actions, policy_weights = policy_dataset
+            policy_obs, policy_actions, policy_weights, policy_bucket_counts = policy_dataset
             policy_obs = policy_obs.to(device)
             policy_actions = policy_actions.to(device)
             policy_weights = policy_weights.to(device)
 
-        better_obs = None
-        worse_obs = None
+        value_obs = None
+        value_targets = None
+        value_weights = None
+        if value_dataset is not None:
+            value_obs, value_targets, value_weights, value_bucket_counts = value_dataset
+            value_obs = value_obs.to(device)
+            value_targets = value_targets.to(device)
+            value_weights = value_weights.to(device)
+
+        ranking_obs = None
+        better_actions = None
+        worse_actions = None
         ranking_weights = None
         if ranking_dataset is not None:
-            better_obs, worse_obs, ranking_weights = ranking_dataset
-            better_obs = better_obs.to(device)
-            worse_obs = worse_obs.to(device)
+            ranking_obs, better_actions, worse_actions, ranking_weights, ranking_bucket_counts = ranking_dataset
+            ranking_obs = ranking_obs.to(device)
+            better_actions = better_actions.to(device)
+            worse_actions = worse_actions.to(device)
             ranking_weights = ranking_weights.to(device)
 
         for _ in progress_iter(range(args.update_epochs), desc=f"update epoch {epoch}", unit="pass", leave=False):
-            if better_obs is not None and args.ranking_coef > 0:
-                for batch in minibatch_indices(better_obs.shape[0], args.batch_size, rng):
+            if value_obs is not None and args.value_coef > 0:
+                for batch in minibatch_indices(value_obs.shape[0], args.batch_size, rng):
                     batch_idx = torch.tensor(batch, dtype=torch.int64, device=device)
-                    batch_better = better_obs.index_select(0, batch_idx)
-                    batch_worse = worse_obs.index_select(0, batch_idx)
+                    batch_obs = value_obs.index_select(0, batch_idx)
+                    batch_targets = value_targets.index_select(0, batch_idx)
+                    batch_weights = value_weights.index_select(0, batch_idx)
+                    _logits, values = model(batch_obs)
+                    value_loss = nn.functional.smooth_l1_loss(values, batch_targets, reduction="none")
+                    value_loss = (value_loss * batch_weights).sum() / batch_weights.sum().clamp_min(1e-6)
+                    loss = args.value_coef * value_loss
+
+                    optimizer.zero_grad()
+                    loss.backward()
+                    if args.grad_clip > 0:
+                        torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
+                    optimizer.step()
+                    value_loss_value = float(value_loss.item())
+                    update_losses.append(float(loss.item()))
+
+            if ranking_obs is not None and args.ranking_coef > 0:
+                for batch in minibatch_indices(ranking_obs.shape[0], args.batch_size, rng):
+                    batch_idx = torch.tensor(batch, dtype=torch.int64, device=device)
+                    batch_obs = ranking_obs.index_select(0, batch_idx)
+                    batch_better_actions = better_actions.index_select(0, batch_idx)
+                    batch_worse_actions = worse_actions.index_select(0, batch_idx)
                     batch_weights = ranking_weights.index_select(0, batch_idx)
-                    _better_logits, better_values = model(batch_better)
-                    _worse_logits, worse_values = model(batch_worse)
-                    delta = better_values - worse_values
+                    logits, _values = model(batch_obs)
+                    better_logits = logits.gather(1, batch_better_actions.unsqueeze(1)).squeeze(1)
+                    worse_logits = logits.gather(1, batch_worse_actions.unsqueeze(1)).squeeze(1)
+                    delta = better_logits - worse_logits
                     ranking_loss = nn.functional.softplus(args.ranking_margin - delta)
                     ranking_loss = (ranking_loss * batch_weights).sum() / batch_weights.sum().clamp_min(1e-6)
                     loss = args.ranking_coef * ranking_loss
@@ -954,9 +1095,14 @@ def main() -> int:
             "epsilon": epsilon,
             "loss": sum(update_losses) / max(1, len(update_losses)),
             "ranking_loss": ranking_loss_value,
+            "value_loss": value_loss_value,
             "imitation_loss": imitation_loss_value,
-            "ranking_pairs": 0 if better_obs is None else int(better_obs.shape[0]),
+            "ranking_pairs": 0 if ranking_obs is None else int(ranking_obs.shape[0]),
+            "value_examples": 0 if value_obs is None else int(value_obs.shape[0]),
             "policy_examples": 0 if policy_obs is None else int(policy_obs.shape[0]),
+            "policy_bucket_counts": policy_bucket_counts,
+            "value_bucket_counts": value_bucket_counts,
+            "ranking_bucket_counts": ranking_bucket_counts,
             "train_bucket_stats": train_bucket_stats,
         }
 
@@ -1032,6 +1178,7 @@ def main() -> int:
             f"train_timeout_pct={summary['train_timeout_pct']:.2f}% "
             f"loss={summary['loss']:.6f} "
             f"ranking_loss={summary['ranking_loss']:.6f} "
+            f"value_loss={summary['value_loss']:.6f} "
             f"imitation_loss={summary['imitation_loss']:.6f}"
         )
         if "eval_avg_cost" in summary:
@@ -1048,6 +1195,12 @@ def main() -> int:
             for bucket, stats in summary["train_bucket_stats"].items()
         )
         print(f"train buckets: {train_bucket_line}")
+        print(
+            "train datasets: "
+            f"policy={summary['policy_examples']} {summary['policy_bucket_counts']} "
+            f"value={summary['value_examples']} {summary['value_bucket_counts']} "
+            f"ranking={summary['ranking_pairs']} {summary['ranking_bucket_counts']}"
+        )
         if "eval_bucket_stats" in summary:
             eval_bucket_line = " | ".join(
                 f"{bucket}:n={int(stats['count'])},gap={stats['avg_ref_gap']:.3f},fail={stats['fail_pct']:.1f}%"
