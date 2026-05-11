@@ -1,2 +1,4 @@
 *pdf
 /rf_flow/__pycache__/
+*.pt
+iMAP/build

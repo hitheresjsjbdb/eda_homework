@@ -3,10 +3,22 @@ from __future__ import annotations
 import math
 
 
-def case_weight(init_cost: float, min_weight: float = 1.0, max_weight: float = 3.0) -> float:
+def case_weight(init_cost: float, min_weight: float = 1.0, max_weight: float = 1.8) -> float:
     scaled = math.log1p(max(1.0, init_cost)) / math.log1p(1000.0)
     weight = min_weight + (max_weight - min_weight) * max(0.0, min(1.0, scaled))
     return weight
+
+
+def case_bucket(
+    init_cost: float,
+    small_threshold: float = 200.0,
+    large_threshold: float = 1000.0,
+) -> str:
+    if init_cost < small_threshold:
+        return "small"
+    if init_cost < large_threshold:
+        return "medium"
+    return "large"
 
 
 def adapt_search_budget(

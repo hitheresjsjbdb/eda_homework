@@ -19,7 +19,7 @@ if __package__ is None or __package__ == "":
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from rl_flow.actions import default_macro_actions
-from rl_flow.budget import adapt_search_budget, case_weight
+from rl_flow.budget import adapt_search_budget, case_bucket, case_weight
 from rl_flow.imap_env import ImapEnv
 from rl_flow.model import PolicyValueNet
 from rl_flow.policy_search import beam_search, load_policy_checkpoint, search_candidates
@@ -55,6 +55,12 @@ def build_policy_dataset(
     episodes: list[dict],
     archive: dict[str, dict],
     topk_per_case: int,
+    rng: random.Random,
+    small_threshold: float,
+    large_threshold: float,
+    balance_mode: str,
+    weight_min: float,
+    weight_max: float,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor] | None:
     grouped: dict[str, list[dict]] = defaultdict(list)
     for episode in episodes:
@@ -66,22 +72,27 @@ def build_policy_dataset(
     obs_rows: list[np.ndarray] = []
     action_rows: list[int] = []
     weight_rows: list[float] = []
+    bucket_rows: list[str] = []
     for case_name, case_episodes in grouped.items():
         del case_name
         ranked = sorted(case_episodes, key=lambda item: float(item["final_return"]), reverse=True)
         for episode in ranked[:topk_per_case]:
-            weight = case_weight(float(episode.get("initial_cost", episode["cost"])))
+            init_cost = float(episode.get("initial_cost", episode["cost"]))
+            weight = case_weight(init_cost, min_weight=weight_min, max_weight=weight_max)
+            bucket = case_bucket(init_cost, small_threshold=small_threshold, large_threshold=large_threshold)
             for step in episode["steps"]:
                 obs_rows.append(np.array(step.obs, copy=True))
                 action_rows.append(int(step.action))
                 weight_rows.append(weight)
+                bucket_rows.append(bucket)
 
     if not obs_rows:
         return None
 
-    obs = torch.tensor(np.stack(obs_rows, axis=0), dtype=torch.float32)
-    actions = torch.tensor(action_rows, dtype=torch.int64)
-    weights = torch.tensor(weight_rows, dtype=torch.float32)
+    selected = rebalance_indices(bucket_rows, rng, balance_mode)
+    obs = torch.tensor(np.stack([obs_rows[i] for i in selected], axis=0), dtype=torch.float32)
+    actions = torch.tensor([action_rows[i] for i in selected], dtype=torch.int64)
+    weights = torch.tensor([weight_rows[i] for i in selected], dtype=torch.float32)
     return obs, actions, weights
 
 
@@ -89,6 +100,12 @@ def build_pairwise_ranking_dataset(
     episodes: list[dict],
     min_return_gap: float,
     max_pairs_per_bucket: int,
+    rng: random.Random,
+    small_threshold: float,
+    large_threshold: float,
+    balance_mode: str,
+    weight_min: float,
+    weight_max: float,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor] | None:
     buckets: dict[tuple[str, int], list[tuple[np.ndarray, float]]] = defaultdict(list)
     case_initial_cost: dict[str, float] = {}
@@ -102,11 +119,14 @@ def build_pairwise_ranking_dataset(
     better_rows: list[np.ndarray] = []
     worse_rows: list[np.ndarray] = []
     weight_rows: list[float] = []
+    bucket_rows: list[str] = []
     for (case_name, _step_index), bucket_items in buckets.items():
         if len(bucket_items) < 2:
             continue
         ranked = sorted(bucket_items, key=lambda item: item[1], reverse=True)
-        pair_weight = case_weight(case_initial_cost.get(case_name, 1.0))
+        init_cost = case_initial_cost.get(case_name, 1.0)
+        pair_weight = case_weight(init_cost, min_weight=weight_min, max_weight=weight_max)
+        pair_bucket = case_bucket(init_cost, small_threshold=small_threshold, large_threshold=large_threshold)
         pair_count = 0
         for better_idx in range(len(ranked)):
             for worse_idx in range(better_idx + 1, len(ranked)):
@@ -117,6 +137,7 @@ def build_pairwise_ranking_dataset(
                 better_rows.append(better_obs)
                 worse_rows.append(worse_obs)
                 weight_rows.append(pair_weight)
+                bucket_rows.append(pair_bucket)
                 pair_count += 1
                 if pair_count >= max_pairs_per_bucket:
                     break
@@ -126,10 +147,71 @@ def build_pairwise_ranking_dataset(
     if not better_rows:
         return None
 
-    better = torch.tensor(np.stack(better_rows, axis=0), dtype=torch.float32)
-    worse = torch.tensor(np.stack(worse_rows, axis=0), dtype=torch.float32)
-    weights = torch.tensor(weight_rows, dtype=torch.float32)
+    selected = rebalance_indices(bucket_rows, rng, balance_mode)
+    better = torch.tensor(np.stack([better_rows[i] for i in selected], axis=0), dtype=torch.float32)
+    worse = torch.tensor(np.stack([worse_rows[i] for i in selected], axis=0), dtype=torch.float32)
+    weights = torch.tensor([weight_rows[i] for i in selected], dtype=torch.float32)
     return better, worse, weights
+
+
+def rebalance_indices(bucket_rows: list[str], rng: random.Random, balance_mode: str) -> list[int]:
+    if balance_mode == "none" or not bucket_rows:
+        return list(range(len(bucket_rows)))
+
+    grouped: dict[str, list[int]] = defaultdict(list)
+    for idx, bucket in enumerate(bucket_rows):
+        grouped[bucket].append(idx)
+    nonempty = [indices for indices in grouped.values() if indices]
+    if not nonempty:
+        return list(range(len(bucket_rows)))
+
+    if balance_mode == "mean":
+        target = max(1, int(round(sum(len(indices) for indices in nonempty) / len(nonempty))))
+    else:
+        target = max(len(indices) for indices in nonempty)
+
+    selected: list[int] = []
+    for bucket in ("small", "medium", "large"):
+        indices = grouped.get(bucket, [])
+        if not indices:
+            continue
+        if len(indices) >= target:
+            selected.extend(rng.sample(indices, target))
+        else:
+            chosen = list(indices)
+            while len(chosen) < target:
+                chosen.append(rng.choice(indices))
+            selected.extend(chosen)
+    rng.shuffle(selected)
+    return selected
+
+
+def summarize_bucket_metrics(
+    items: list[dict],
+    small_threshold: float,
+    large_threshold: float,
+) -> dict[str, dict[str, float]]:
+    buckets = {
+        "small": {"count": 0.0, "return_sum": 0.0, "cost_sum": 0.0, "ref_gap_sum": 0.0, "fail_sum": 0.0},
+        "medium": {"count": 0.0, "return_sum": 0.0, "cost_sum": 0.0, "ref_gap_sum": 0.0, "fail_sum": 0.0},
+        "large": {"count": 0.0, "return_sum": 0.0, "cost_sum": 0.0, "ref_gap_sum": 0.0, "fail_sum": 0.0},
+    }
+    for item in items:
+        init_cost = float(item.get("initial_cost", item.get("cost", 0.0)))
+        bucket = case_bucket(init_cost, small_threshold=small_threshold, large_threshold=large_threshold)
+        entry = buckets[bucket]
+        entry["count"] += 1.0
+        entry["return_sum"] += float(item.get("final_return", 0.0))
+        entry["cost_sum"] += float(item.get("cost", 0.0))
+        entry["ref_gap_sum"] += float(item.get("ref_cost_gap", 0.0))
+        entry["fail_sum"] += 1.0 if item.get("done_reason") in {"action_timeout", "action_error"} else 0.0
+    for entry in buckets.values():
+        count = max(1.0, entry["count"])
+        entry["avg_return"] = entry["return_sum"] / count
+        entry["avg_cost"] = entry["cost_sum"] / count
+        entry["avg_ref_gap"] = entry["ref_gap_sum"] / count
+        entry["fail_pct"] = 100.0 * entry["fail_sum"] / count
+    return buckets
 
 
 def minibatch_indices(size: int, batch_size: int, rng: random.Random) -> list[list[int]]:
@@ -398,6 +480,8 @@ def evaluate_split(
     temperature: float,
     expand_workers: int,
     num_workers: int,
+    small_threshold: float,
+    large_threshold: float,
     checkpoint_path: Path | None = None,
 ) -> dict[str, object]:
     results = []
@@ -467,16 +551,29 @@ def evaluate_split(
                 max_steps=max_steps,
                 timeout_sec=timeout_sec,
             )
+            env.reset()
+            if env.initial_snapshot is None:
+                raise RuntimeError("failed to initialize environment")
+            init_cost = float(env.initial_snapshot.cost)
+            local_max_steps, local_beam_width, local_branch_topk = adapt_search_budget(
+                init_cost,
+                max_steps,
+                beam_width,
+                branch_topk,
+            )
+            env.max_steps = local_max_steps
             result = beam_search(
                 env=env,
                 model=model,
                 device=device,
-                beam_width=beam_width,
-                branch_topk=branch_topk,
+                beam_width=local_beam_width,
+                branch_topk=local_branch_topk,
                 temperature=temperature,
                 expand_workers=expand_workers,
+                reset_env=False,
             )
             result["case_name"] = case_name
+            result["initial_cost"] = init_cost
             case_dir = case_root / case_name
             ref = read_ref_qor(case_dir)
             result["ref"] = ref
@@ -498,6 +595,11 @@ def evaluate_split(
             results.append(result)
             total_cost += float(result["cost"])
 
+    bucket_stats = summarize_bucket_metrics(
+        results,
+        small_threshold=small_threshold,
+        large_threshold=large_threshold,
+    )
     return {
         "case_count": len(results),
         "avg_cost": total_cost / max(1, len(results)),
@@ -509,6 +611,7 @@ def evaluate_split(
         "timeout_pct": 100.0 * timeout_count / max(1, len(results)),
         "error_pct": 100.0 * error_count / max(1, len(results)),
         "fail_pct": 100.0 * (timeout_count + error_count) / max(1, len(results)),
+        "bucket_stats": bucket_stats,
         "results": results,
     }
 
@@ -588,6 +691,11 @@ def main() -> int:
     parser.add_argument("--min-return-gap", type=float, default=0.01)
     parser.add_argument("--max-pairs-per-bucket", type=int, default=8)
     parser.add_argument("--elite-topk-per-case", type=int, default=2)
+    parser.add_argument("--small-cost-threshold", type=float, default=200.0)
+    parser.add_argument("--large-cost-threshold", type=float, default=1000.0)
+    parser.add_argument("--case-weight-min", type=float, default=1.0)
+    parser.add_argument("--case-weight-max", type=float, default=1.8)
+    parser.add_argument("--bucket-balance-mode", choices=("none", "mean", "max"), default="mean")
     parser.add_argument("--epsilon", type=float, default=0.25)
     parser.add_argument("--epsilon-decay", type=float, default=0.96)
     parser.add_argument("--min-epsilon", type=float, default=0.05)
@@ -741,11 +849,23 @@ def main() -> int:
             episodes=collected,
             archive=archive,
             topk_per_case=args.elite_topk_per_case,
+            rng=rng,
+            small_threshold=args.small_cost_threshold,
+            large_threshold=args.large_cost_threshold,
+            balance_mode=args.bucket_balance_mode,
+            weight_min=args.case_weight_min,
+            weight_max=args.case_weight_max,
         )
         ranking_dataset = build_pairwise_ranking_dataset(
             episodes=collected,
             min_return_gap=args.min_return_gap,
             max_pairs_per_bucket=args.max_pairs_per_bucket,
+            rng=rng,
+            small_threshold=args.small_cost_threshold,
+            large_threshold=args.large_cost_threshold,
+            balance_mode=args.bucket_balance_mode,
+            weight_min=args.case_weight_min,
+            weight_max=args.case_weight_max,
         )
 
         model.train()
@@ -818,6 +938,11 @@ def main() -> int:
         train_timeout_count = sum(1 for item in collected if item.get("done_reason") == "action_timeout")
         train_error_count = sum(1 for item in collected if item.get("done_reason") == "action_error")
         train_fail_count = train_timeout_count + train_error_count
+        train_bucket_stats = summarize_bucket_metrics(
+            collected,
+            small_threshold=args.small_cost_threshold,
+            large_threshold=args.large_cost_threshold,
+        )
         summary = {
             "epoch": epoch,
             "train_avg_cost": train_avg_cost,
@@ -832,6 +957,7 @@ def main() -> int:
             "imitation_loss": imitation_loss_value,
             "ranking_pairs": 0 if better_obs is None else int(better_obs.shape[0]),
             "policy_examples": 0 if policy_obs is None else int(policy_obs.shape[0]),
+            "train_bucket_stats": train_bucket_stats,
         }
 
         if eval_cases and epoch % args.eval_every == 0:
@@ -858,6 +984,8 @@ def main() -> int:
                     temperature=args.temperature,
                     expand_workers=args.eval_search_workers,
                     num_workers=eval_workers,
+                    small_threshold=args.small_cost_threshold,
+                    large_threshold=args.large_cost_threshold,
                     checkpoint_path=eval_ckpt,
                 )
             finally:
@@ -870,6 +998,7 @@ def main() -> int:
             summary["eval_exact_ref_matches"] = int(eval_summary["exact_ref_matches"])
             summary["eval_fail_pct"] = float(eval_summary["fail_pct"])
             summary["eval_timeout_pct"] = float(eval_summary["timeout_pct"])
+            summary["eval_bucket_stats"] = eval_summary["bucket_stats"]
             if float(eval_summary["avg_cost"]) < best_eval_cost:
                 best_eval_cost = float(eval_summary["avg_cost"])
                 save_checkpoint(
@@ -914,6 +1043,17 @@ def main() -> int:
                 f" eval_exact_ref_matches={summary['eval_exact_ref_matches']}"
             )
         print(status)
+        train_bucket_line = " | ".join(
+            f"{bucket}:n={int(stats['count'])},ret={stats['avg_return']:.3f},fail={stats['fail_pct']:.1f}%"
+            for bucket, stats in summary["train_bucket_stats"].items()
+        )
+        print(f"train buckets: {train_bucket_line}")
+        if "eval_bucket_stats" in summary:
+            eval_bucket_line = " | ".join(
+                f"{bucket}:n={int(stats['count'])},gap={stats['avg_ref_gap']:.3f},fail={stats['fail_pct']:.1f}%"
+                for bucket, stats in summary["eval_bucket_stats"].items()
+            )
+            print(f"eval buckets: {eval_bucket_line}")
 
     if args.history_json is not None:
         args.history_json.parent.mkdir(parents=True, exist_ok=True)

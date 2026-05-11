@@ -13,7 +13,7 @@ if __package__ is None or __package__ == "":
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from rl_flow.actions import default_macro_actions
-from rl_flow.budget import adapt_search_budget
+from rl_flow.budget import adapt_search_budget, case_bucket
 from rl_flow.imap_env import ImapEnv
 from rl_flow.policy_search import beam_search, load_policy_checkpoint
 from rl_flow.progress import progress_iter
@@ -30,6 +30,8 @@ _EVAL_BEAM_WIDTH = 5
 _EVAL_BRANCH_TOPK = 4
 _EVAL_TEMPERATURE = 1.0
 _EVAL_EXPAND_WORKERS = 1
+_EVAL_SMALL_THRESHOLD = 200.0
+_EVAL_LARGE_THRESHOLD = 1000.0
 
 
 def _init_eval_worker(
@@ -42,6 +44,8 @@ def _init_eval_worker(
     branch_topk: int,
     temperature: float,
     expand_workers: int,
+    small_threshold: float,
+    large_threshold: float,
 ) -> None:
     global _EVAL_MODEL
     global _EVAL_ACTIONS
@@ -53,6 +57,8 @@ def _init_eval_worker(
     global _EVAL_BRANCH_TOPK
     global _EVAL_TEMPERATURE
     global _EVAL_EXPAND_WORKERS
+    global _EVAL_SMALL_THRESHOLD
+    global _EVAL_LARGE_THRESHOLD
 
     os.environ["OMP_NUM_THREADS"] = "1"
     os.environ["OPENBLAS_NUM_THREADS"] = "1"
@@ -68,6 +74,8 @@ def _init_eval_worker(
     _EVAL_BRANCH_TOPK = branch_topk
     _EVAL_TEMPERATURE = temperature
     _EVAL_EXPAND_WORKERS = expand_workers
+    _EVAL_SMALL_THRESHOLD = small_threshold
+    _EVAL_LARGE_THRESHOLD = large_threshold
 
 
 def _evaluate_case_worker(case_name: str) -> dict[str, object]:
@@ -112,6 +120,8 @@ def _evaluate_case_worker(case_name: str) -> dict[str, object]:
         "depth": int(final_info["depth"]),
         "sequence": str(final_info["sequence"]),
         "ref": ref,
+        "initial_cost": init_cost,
+        "done_reason": final_info.get("done_reason"),
     }
     if ref is not None:
         item["ref_area_gap"] = int(final_info["area"]) - ref["area"]
@@ -131,6 +141,8 @@ def main() -> int:
     parser.add_argument("--beam-width", type=int, default=5)
     parser.add_argument("--beam-branch-topk", type=int, default=4)
     parser.add_argument("--temperature", type=float, default=1.0)
+    parser.add_argument("--small-cost-threshold", type=float, default=200.0)
+    parser.add_argument("--large-cost-threshold", type=float, default=1000.0)
     parser.add_argument("--search-workers", type=int, default=1)
     parser.add_argument("--num-workers", type=int, default=0)
     parser.add_argument("--timeout-sec", type=float, default=60.0)
@@ -176,6 +188,8 @@ def main() -> int:
                 args.beam_branch_topk,
                 args.temperature,
                 args.search_workers,
+                args.small_cost_threshold,
+                args.large_cost_threshold,
             ),
         ) as executor:
             futures = [executor.submit(_evaluate_case_worker, case_name) for case_name in case_names]
@@ -248,6 +262,7 @@ def main() -> int:
                 "sequence": str(final_info["sequence"]),
                 "ref": ref,
                 "done_reason": final_info.get("done_reason"),
+                "initial_cost": init_cost,
             }
             if item.get("done_reason") == "action_timeout":
                 timeout_count += 1
@@ -293,6 +308,28 @@ def main() -> int:
         "fail_pct": 100.0 * (timeout_count + error_count) / max(1, len(results)),
         "results": results,
     }
+
+    bucket_stats = {
+        "small": {"count": 0, "ref_gap_sum": 0.0, "fail_count": 0},
+        "medium": {"count": 0, "ref_gap_sum": 0.0, "fail_count": 0},
+        "large": {"count": 0, "ref_gap_sum": 0.0, "fail_count": 0},
+    }
+    for item in results:
+        bucket = case_bucket(
+            float(item.get("initial_cost", item["cost"])),
+            small_threshold=args.small_cost_threshold,
+            large_threshold=args.large_cost_threshold,
+        )
+        stats = bucket_stats[bucket]
+        stats["count"] += 1
+        stats["ref_gap_sum"] += float(item.get("ref_cost_gap", 0.0))
+        if item.get("done_reason") in {"action_timeout", "action_error"}:
+            stats["fail_count"] += 1
+    for stats in bucket_stats.values():
+        count = max(1, stats["count"])
+        stats["avg_ref_gap"] = stats["ref_gap_sum"] / count
+        stats["fail_pct"] = 100.0 * stats["fail_count"] / count
+    summary["bucket_stats"] = bucket_stats
     args.output_json.parent.mkdir(parents=True, exist_ok=True)
     args.output_json.write_text(json.dumps(summary, indent=2, sort_keys=True), encoding="utf-8")
 
@@ -316,6 +353,12 @@ def main() -> int:
             f"winner={winner} "
             f"gap={gap:.4f}"
         )
+
+    bucket_line = " | ".join(
+        f"{bucket}:n={stats['count']},gap={stats['avg_ref_gap']:.3f},fail={stats['fail_pct']:.1f}%"
+        for bucket, stats in summary["bucket_stats"].items()
+    )
+    print(f"buckets: {bucket_line}")
 
     print(
         f"cases={len(results)} "

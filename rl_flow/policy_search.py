@@ -417,4 +417,5 @@ def beam_search(
         "cost": float(winner.final_info["cost"]),
         "area": int(winner.final_info["area"]),
         "depth": int(winner.final_info["depth"]),
+        "done_reason": winner.final_info.get("done_reason"),
     }
