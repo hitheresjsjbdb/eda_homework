@@ -40,6 +40,7 @@ class DecisionPoint:
 
 @dataclass
 class BeamNode:
+    node_id: int
     state: SearchState
     done: bool
     final_info: dict[str, object]
@@ -55,7 +56,6 @@ class PendingExpansion:
     probs: torch.Tensor
     entropy: float
     action_idx: int
-    group_id: int
 
 
 def load_policy_checkpoint(path: Path, device: torch.device) -> tuple[PolicyValueNet, dict]:
@@ -194,6 +194,7 @@ def search_candidates(
     }
     beam = [
         BeamNode(
+            node_id=0,
             state=initial_state,
             done=False,
             final_info=initial_info,
@@ -204,24 +205,27 @@ def search_candidates(
     ]
     terminal_nodes: list[BeamNode] = []
     decision_points: list[DecisionPoint] = []
+    node_records: dict[int, dict[str, object]] = {
+        0: {
+            "obs": np.array(env.observe_state(initial_state), copy=True),
+            "children": [],
+            "action": None,
+            "done": False,
+            "terminal_return": None,
+            "bootstrap_return": _normalized_return(env, initial_state.snapshot.cost),
+        }
+    }
+    next_node_id = 1
 
     for _ in range(env.max_steps):
         expanded: list[BeamNode] = []
         pending: list[PendingExpansion] = []
-        decision_groups: list[dict[str, object]] = []
         for node in beam:
             if node.done:
                 terminal_nodes.append(node)
                 continue
 
             node_obs = env.observe_state(node.state)
-            group_id = len(decision_groups)
-            decision_groups.append(
-                {
-                    "obs": np.array(node_obs, copy=True),
-                    "action_scores": [],
-                }
-            )
             logits, _value = policy_logits_value(model, node_obs, device)
             probs = torch.softmax(logits / max(1e-3, temperature), dim=0)
             entropy = float((-(probs * torch.log(probs.clamp_min(1e-12))).sum()).item())
@@ -241,7 +245,6 @@ def search_candidates(
                         probs=probs,
                         entropy=entropy,
                         action_idx=int(action_idx),
-                        group_id=group_id,
                     )
                 )
 
@@ -270,7 +273,19 @@ def search_candidates(
                 _next_logits, next_value = policy_logits_value(model, next_obs, device)
                 predicted = next_value
                 rank_return = _normalized_return(env, next_state.snapshot.cost)
-            decision_groups[item.group_id]["action_scores"].append((int(item.action_idx), rank_return))
+            child_node_id = next_node_id
+            next_node_id += 1
+            bootstrap_return = rank_return + value_weight * predicted
+            node_records[child_node_id] = {
+                "obs": np.array(next_obs, copy=True),
+                "children": [],
+                "action": int(item.action_idx),
+                "parent": item.node.node_id,
+                "done": bool(done),
+                "terminal_return": rank_return if done else None,
+                "bootstrap_return": bootstrap_return,
+            }
+            node_records[item.node.node_id]["children"].append(child_node_id)
 
             step = TrajectoryStep(
                 obs=item.node_obs,
@@ -279,8 +294,9 @@ def search_candidates(
                 entropy=item.entropy,
             )
             new_log_prob = item.node.log_prob_sum + math.log(max(prob, 1e-12))
-            score = rank_return + value_weight * predicted + prior_weight * new_log_prob
+            score = bootstrap_return + prior_weight * new_log_prob
             child = BeamNode(
+                node_id=child_node_id,
                 state=next_state,
                 done=done,
                 final_info=info,
@@ -293,29 +309,43 @@ def search_candidates(
             else:
                 expanded.append(child)
 
-        for group in decision_groups:
-            grouped_scores: dict[int, list[float]] = {}
-            for action_idx, score in group["action_scores"]:
-                grouped_scores.setdefault(int(action_idx), []).append(float(score))
-            if len(grouped_scores) < 2:
-                continue
-            action_scores = [
-                (action_idx, max(scores))
-                for action_idx, scores in grouped_scores.items()
-            ]
-            decision_points.append(
-                DecisionPoint(
-                    obs=np.array(group["obs"], copy=True),
-                    action_scores=action_scores,
-                )
-            )
-
         expanded.sort(key=lambda item: item.score, reverse=True)
         beam = expanded[:beam_width]
         if len(terminal_nodes) >= num_candidates and not beam:
             break
         if not beam:
             break
+
+    best_return: dict[int, float] = {}
+    for node_id in sorted(node_records.keys(), reverse=True):
+        record = node_records[node_id]
+        base_return = record["terminal_return"]
+        if base_return is None:
+            base_return = float(record["bootstrap_return"])
+        child_best = base_return
+        for child_id in record["children"]:
+            child_best = max(child_best, best_return.get(child_id, float(node_records[child_id]["bootstrap_return"])))
+        best_return[node_id] = float(child_best)
+
+    decision_points = []
+    for node_id, record in node_records.items():
+        children = record["children"]
+        if len(children) < 2:
+            continue
+        grouped_scores: dict[int, list[float]] = {}
+        for child_id in children:
+            child_record = node_records[child_id]
+            action_idx = int(child_record["action"])
+            child_score = best_return.get(child_id, float(child_record["bootstrap_return"]))
+            grouped_scores.setdefault(action_idx, []).append(float(child_score))
+        if len(grouped_scores) < 2:
+            continue
+        decision_points.append(
+            DecisionPoint(
+                obs=np.array(record["obs"], copy=True),
+                action_scores=[(action_idx, max(scores)) for action_idx, scores in grouped_scores.items()],
+            )
+        )
 
     if not terminal_nodes:
         terminal_nodes = [min(beam, key=lambda item: float(item.final_info["cost"]))] if beam else []
@@ -362,6 +392,7 @@ def beam_search(
     }
     beam = [
         BeamNode(
+            node_id=-1,
             state=initial_state,
             done=False,
             final_info=initial_info,
@@ -394,7 +425,6 @@ def beam_search(
                         probs=probs,
                         entropy=0.0,
                         action_idx=int(action_idx),
-                        group_id=0,
                     )
                 )
 
@@ -427,6 +457,7 @@ def beam_search(
             new_log_prob = item.node.log_prob_sum + math.log(max(prob, 1e-12))
             score = rank_return + value_weight * predicted + prior_weight * new_log_prob
             child = BeamNode(
+                node_id=-1,
                 state=next_state,
                 done=done,
                 final_info=info,
