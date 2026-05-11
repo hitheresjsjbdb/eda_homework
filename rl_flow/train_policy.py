@@ -75,154 +75,117 @@ def _selected_bucket_counts(bucket_rows: list[str], selected: list[int]) -> dict
     return counts
 
 
-def build_policy_dataset(
-    episodes: list[dict],
-    archive: dict[str, dict],
-    topk_per_case: int,
-    rng: random.Random,
-    small_threshold: float,
-    large_threshold: float,
-    balance_mode: str,
-    weight_min: float,
-    weight_max: float,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, dict[str, int]] | None:
-    grouped = _group_training_episodes(episodes, archive)
-
-    obs_rows: list[np.ndarray] = []
-    action_rows: list[int] = []
-    weight_rows: list[float] = []
-    bucket_rows: list[str] = []
-    for case_name, case_episodes in grouped.items():
-        del case_name
-        ranked = sorted(case_episodes, key=lambda item: float(item["final_return"]), reverse=True)
-        for episode in ranked[:topk_per_case]:
-            init_cost = float(episode.get("initial_cost", episode["cost"]))
-            quality_scale = 1.0 + max(0.0, float(episode["final_return"])) * 4.0
-            weight = case_weight(init_cost, min_weight=weight_min, max_weight=weight_max) * quality_scale
-            bucket = case_bucket(init_cost, small_threshold=small_threshold, large_threshold=large_threshold)
-            for step in episode["steps"]:
-                obs_rows.append(np.array(step.obs, copy=True))
-                action_rows.append(int(step.action))
-                weight_rows.append(weight)
-                bucket_rows.append(bucket)
-
-    if not obs_rows:
-        return None
-
-    selected = rebalance_indices(bucket_rows, rng, balance_mode)
-    obs = torch.tensor(np.stack([obs_rows[i] for i in selected], axis=0), dtype=torch.float32)
-    actions = torch.tensor([action_rows[i] for i in selected], dtype=torch.int64)
-    weights = torch.tensor([weight_rows[i] for i in selected], dtype=torch.float32)
-    return obs, actions, weights, _selected_bucket_counts(bucket_rows, selected)
-
-
-def build_value_dataset(
-    episodes: list[dict],
-    archive: dict[str, dict],
-    rng: random.Random,
-    small_threshold: float,
-    large_threshold: float,
-    balance_mode: str,
-    weight_min: float,
-    weight_max: float,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, dict[str, int]] | None:
-    grouped = _group_training_episodes(episodes, archive)
-    state_values: dict[tuple[str, bytes], dict[str, object]] = {}
-    for case_name, case_episodes in grouped.items():
-        for episode in case_episodes:
-            init_cost = float(episode.get("initial_cost", episode["cost"]))
-            final_return = float(episode["final_return"])
-            bucket = case_bucket(init_cost, small_threshold=small_threshold, large_threshold=large_threshold)
-            weight = case_weight(init_cost, min_weight=weight_min, max_weight=weight_max)
-            for step in episode["steps"]:
-                obs = np.array(step.obs, copy=True)
-                key = _state_key(case_name, obs)
-                existing = state_values.get(key)
-                if existing is None or final_return > float(existing["target"]):
-                    state_values[key] = {
-                        "obs": obs,
-                        "target": final_return,
-                        "weight": weight,
-                        "bucket": bucket,
-                    }
-
-    if not state_values:
-        return None
-
-    obs_rows: list[np.ndarray] = []
-    target_rows: list[float] = []
-    weight_rows: list[float] = []
-    bucket_rows: list[str] = []
-    for item in state_values.values():
-        obs_rows.append(np.array(item["obs"], copy=True))
-        target_rows.append(float(item["target"]))
-        weight_rows.append(float(item["weight"]))
-        bucket_rows.append(str(item["bucket"]))
-
-    selected = rebalance_indices(bucket_rows, rng, balance_mode)
-    obs = torch.tensor(np.stack([obs_rows[i] for i in selected], axis=0), dtype=torch.float32)
-    targets = torch.tensor([target_rows[i] for i in selected], dtype=torch.float32)
-    weights = torch.tensor([weight_rows[i] for i in selected], dtype=torch.float32)
-    return obs, targets, weights, _selected_bucket_counts(bucket_rows, selected)
-
-
-def build_action_ranking_dataset(
+def build_tree_datasets(
     decisions: list[dict],
-    min_return_gap: float,
-    max_pairs_per_bucket: int,
     rng: random.Random,
     small_threshold: float,
     large_threshold: float,
     balance_mode: str,
     weight_min: float,
     weight_max: float,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, dict[str, int]] | None:
-    obs_rows: list[np.ndarray] = []
-    better_action_rows: list[int] = []
-    worse_action_rows: list[int] = []
-    pair_weight_rows: list[float] = []
-    bucket_rows: list[str] = []
+    policy_target_temperature: float,
+) -> tuple[
+    tuple[torch.Tensor, torch.Tensor, torch.Tensor, dict[str, int]] | None,
+    tuple[torch.Tensor, torch.Tensor, torch.Tensor, dict[str, int]] | None,
+]:
+    policy_states: dict[tuple[str, bytes], dict[str, object]] = {}
+    value_states: dict[tuple[str, bytes], dict[str, object]] = {}
+
     for item in decisions:
+        case_name = str(item["case_name"])
         init_cost = float(item["initial_cost"])
+        bucket = case_bucket(init_cost, small_threshold=small_threshold, large_threshold=large_threshold)
+        base_weight = case_weight(init_cost, min_weight=weight_min, max_weight=weight_max)
+        obs = np.asarray(item["obs"], dtype=np.float32)
+        state_key = _state_key(case_name, obs)
+        state_return = float(item["state_return"])
+
+        value_entry = value_states.get(state_key)
+        if value_entry is None or state_return > float(value_entry["target"]):
+            value_states[state_key] = {
+                "obs": np.array(obs, copy=True),
+                "target": state_return,
+                "weight": base_weight * (1.0 + max(0.0, state_return) * 4.0),
+                "bucket": bucket,
+            }
+
         scored_actions = [(int(action), float(score)) for action, score in item["action_scores"]]
         if len(scored_actions) < 2:
             continue
-        ranked = sorted(scored_actions, key=lambda value: value[1], reverse=True)
-        pair_bucket = case_bucket(
-            init_cost,
-            small_threshold=small_threshold,
-            large_threshold=large_threshold,
-        )
-        pair_base_weight = case_weight(init_cost, min_weight=weight_min, max_weight=weight_max)
-        pair_count = 0
-        for better_idx in range(len(ranked)):
-            for worse_idx in range(better_idx + 1, len(ranked)):
-                better_action, better_return = ranked[better_idx]
-                worse_action, worse_return = ranked[worse_idx]
-                gap = better_return - worse_return
-                if gap < min_return_gap:
-                    continue
-                pair_weight = pair_base_weight * min(4.0, 1.0 + gap / max(min_return_gap, 1e-6))
-                obs_rows.append(np.array(item["obs"], copy=True))
-                better_action_rows.append(better_action)
-                worse_action_rows.append(worse_action)
-                pair_weight_rows.append(pair_weight)
-                bucket_rows.append(pair_bucket)
-                pair_count += 1
-                if pair_count >= max_pairs_per_bucket:
-                    break
-            if pair_count >= max_pairs_per_bucket:
-                break
 
-    if not obs_rows:
-        return None
+        policy_entry = policy_states.get(state_key)
+        if policy_entry is None:
+            policy_entry = {
+                "obs": np.array(obs, copy=True),
+                "action_map": {},
+                "target": state_return,
+                "weight": base_weight,
+                "bucket": bucket,
+            }
+            policy_states[state_key] = policy_entry
+        policy_entry["target"] = max(float(policy_entry["target"]), state_return)
+        for action, score in scored_actions:
+            current = policy_entry["action_map"].get(action)
+            if current is None or score > float(current):
+                policy_entry["action_map"][action] = float(score)
 
-    selected = rebalance_indices(bucket_rows, rng, balance_mode)
-    obs = torch.tensor(np.stack([obs_rows[i] for i in selected], axis=0), dtype=torch.float32)
-    better_actions = torch.tensor([better_action_rows[i] for i in selected], dtype=torch.int64)
-    worse_actions = torch.tensor([worse_action_rows[i] for i in selected], dtype=torch.int64)
-    weights = torch.tensor([pair_weight_rows[i] for i in selected], dtype=torch.float32)
-    return obs, better_actions, worse_actions, weights, _selected_bucket_counts(bucket_rows, selected)
+    def build_policy() -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, dict[str, int]] | None:
+        obs_rows: list[np.ndarray] = []
+        target_rows: list[np.ndarray] = []
+        weight_rows: list[float] = []
+        bucket_rows: list[str] = []
+        for item in policy_states.values():
+            action_map = item["action_map"]
+            if len(action_map) < 2:
+                continue
+            actions = list(action_map.keys())
+            scores = np.array([float(action_map[action]) for action in actions], dtype=np.float32)
+            order = np.argsort(scores)[::-1]
+            sorted_scores = scores[order]
+            top_gap = float(sorted_scores[0] - sorted_scores[1]) if len(sorted_scores) > 1 else 0.0
+            logits = scores / max(1e-3, policy_target_temperature)
+            logits -= float(np.max(logits))
+            probs = np.exp(logits)
+            probs_sum = float(probs.sum())
+            if probs_sum <= 0:
+                probs = np.full_like(probs, 1.0 / max(1, len(probs)))
+            else:
+                probs /= probs_sum
+            target = np.zeros(len(default_macro_actions()), dtype=np.float32)
+            for action, prob in zip(actions, probs.tolist()):
+                target[action] = float(prob)
+            weight = float(item["weight"]) * min(4.0, 1.0 + max(0.0, top_gap) / max(policy_target_temperature, 1e-3))
+            obs_rows.append(np.array(item["obs"], copy=True))
+            target_rows.append(target)
+            weight_rows.append(weight)
+            bucket_rows.append(str(item["bucket"]))
+        if not obs_rows:
+            return None
+        selected = rebalance_indices(bucket_rows, rng, balance_mode)
+        obs = torch.tensor(np.stack([obs_rows[i] for i in selected], axis=0), dtype=torch.float32)
+        target_tensor = torch.tensor(np.stack([target_rows[i] for i in selected], axis=0), dtype=torch.float32)
+        weights = torch.tensor([weight_rows[i] for i in selected], dtype=torch.float32)
+        return obs, target_tensor, weights, _selected_bucket_counts(bucket_rows, selected)
+
+    def build_value() -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, dict[str, int]] | None:
+        obs_rows: list[np.ndarray] = []
+        target_rows: list[float] = []
+        weight_rows: list[float] = []
+        bucket_rows: list[str] = []
+        for item in value_states.values():
+            obs_rows.append(np.array(item["obs"], copy=True))
+            target_rows.append(float(item["target"]))
+            weight_rows.append(float(item["weight"]))
+            bucket_rows.append(str(item["bucket"]))
+        if not obs_rows:
+            return None
+        selected = rebalance_indices(bucket_rows, rng, balance_mode)
+        obs = torch.tensor(np.stack([obs_rows[i] for i in selected], axis=0), dtype=torch.float32)
+        targets = torch.tensor([target_rows[i] for i in selected], dtype=torch.float32)
+        weights = torch.tensor([weight_rows[i] for i in selected], dtype=torch.float32)
+        return obs, targets, weights, _selected_bucket_counts(bucket_rows, selected)
+
+    return build_policy(), build_value()
 
 
 def rebalance_indices(bucket_rows: list[str], rng: random.Random, balance_mode: str) -> list[int]:
@@ -396,6 +359,7 @@ def _sample_case_worker(case_name: str, episodes_per_case: int, seed: int) -> di
                 "case_name": case_name,
                 "initial_cost": init_cost,
                 "obs": np.array(decision.obs, copy=True),
+                "state_return": float(decision.state_return),
                 "action_scores": [(int(action), float(score)) for action, score in decision.action_scores],
             }
         )
@@ -771,9 +735,11 @@ def main() -> int:
     parser.add_argument("--batch-size", type=int, default=256)
     parser.add_argument("--update-epochs", type=int, default=6)
     parser.add_argument("--lr", type=float, default=3e-4)
+    parser.add_argument("--policy-coef", type=float, default=None)
     parser.add_argument("--ranking-coef", type=float, default=1.0)
     parser.add_argument("--value-coef", type=float, default=1.0)
-    parser.add_argument("--imitation-coef", type=float, default=0.4)
+    parser.add_argument("--imitation-coef", type=float, default=0.0)
+    parser.add_argument("--policy-target-temperature", type=float, default=0.05)
     parser.add_argument("--ranking-margin", type=float, default=0.05)
     parser.add_argument("--min-return-gap", type=float, default=0.01)
     parser.add_argument("--max-pairs-per-bucket", type=int, default=8)
@@ -932,6 +898,7 @@ def main() -> int:
                                 "case_name": case_name,
                                 "initial_cost": init_cost,
                                 "obs": np.array(decision.obs, copy=True),
+                                "state_return": float(decision.state_return),
                                 "action_scores": [(int(action), float(score)) for action, score in decision.action_scores],
                             }
                         )
@@ -948,55 +915,33 @@ def main() -> int:
         if not collected:
             raise SystemExit("no training episodes collected")
 
-        policy_dataset = build_policy_dataset(
-            episodes=collected,
-            archive=archive,
-            topk_per_case=args.elite_topk_per_case,
-            rng=rng,
-            small_threshold=args.small_cost_threshold,
-            large_threshold=args.large_cost_threshold,
-            balance_mode=args.bucket_balance_mode,
-            weight_min=args.case_weight_min,
-            weight_max=args.case_weight_max,
-        )
-        value_dataset = build_value_dataset(
-            episodes=collected,
-            archive=archive,
-            rng=rng,
-            small_threshold=args.small_cost_threshold,
-            large_threshold=args.large_cost_threshold,
-            balance_mode=args.bucket_balance_mode,
-            weight_min=args.case_weight_min,
-            weight_max=args.case_weight_max,
-        )
-        ranking_dataset = build_action_ranking_dataset(
+        policy_dataset, value_dataset = build_tree_datasets(
             decisions=collected_decisions,
-            min_return_gap=args.min_return_gap,
-            max_pairs_per_bucket=args.max_pairs_per_bucket,
             rng=rng,
             small_threshold=args.small_cost_threshold,
             large_threshold=args.large_cost_threshold,
             balance_mode=args.bucket_balance_mode,
             weight_min=args.case_weight_min,
             weight_max=args.case_weight_max,
+            policy_target_temperature=args.policy_target_temperature,
         )
 
         model.train()
         update_losses = []
-        ranking_loss_value = 0.0
+        policy_loss_value = 0.0
         value_loss_value = 0.0
         imitation_loss_value = 0.0
         policy_bucket_counts = {"small": 0, "medium": 0, "large": 0}
         value_bucket_counts = {"small": 0, "medium": 0, "large": 0}
-        ranking_bucket_counts = {"small": 0, "medium": 0, "large": 0}
+        policy_coef = args.policy_coef if args.policy_coef is not None else args.ranking_coef
 
         policy_obs = None
-        policy_actions = None
+        policy_targets = None
         policy_weights = None
         if policy_dataset is not None:
-            policy_obs, policy_actions, policy_weights, policy_bucket_counts = policy_dataset
+            policy_obs, policy_targets, policy_weights, policy_bucket_counts = policy_dataset
             policy_obs = policy_obs.to(device)
-            policy_actions = policy_actions.to(device)
+            policy_targets = policy_targets.to(device)
             policy_weights = policy_weights.to(device)
 
         value_obs = None
@@ -1008,18 +953,27 @@ def main() -> int:
             value_targets = value_targets.to(device)
             value_weights = value_weights.to(device)
 
-        ranking_obs = None
-        better_actions = None
-        worse_actions = None
-        ranking_weights = None
-        if ranking_dataset is not None:
-            ranking_obs, better_actions, worse_actions, ranking_weights, ranking_bucket_counts = ranking_dataset
-            ranking_obs = ranking_obs.to(device)
-            better_actions = better_actions.to(device)
-            worse_actions = worse_actions.to(device)
-            ranking_weights = ranking_weights.to(device)
-
         for _ in progress_iter(range(args.update_epochs), desc=f"update epoch {epoch}", unit="pass", leave=False):
+            if policy_obs is not None and policy_coef > 0:
+                for batch in minibatch_indices(policy_obs.shape[0], args.batch_size, rng):
+                    batch_idx = torch.tensor(batch, dtype=torch.int64, device=device)
+                    batch_obs = policy_obs.index_select(0, batch_idx)
+                    batch_targets = policy_targets.index_select(0, batch_idx)
+                    batch_weights = policy_weights.index_select(0, batch_idx)
+                    logits, _values = model(batch_obs)
+                    log_probs = torch.log_softmax(logits, dim=-1)
+                    policy_loss = -(batch_targets * log_probs).sum(dim=-1)
+                    policy_loss = (policy_loss * batch_weights).sum() / batch_weights.sum().clamp_min(1e-6)
+                    loss = policy_coef * policy_loss
+
+                    optimizer.zero_grad()
+                    loss.backward()
+                    if args.grad_clip > 0:
+                        torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
+                    optimizer.step()
+                    policy_loss_value = float(policy_loss.item())
+                    update_losses.append(float(loss.item()))
+
             if value_obs is not None and args.value_coef > 0:
                 for batch in minibatch_indices(value_obs.shape[0], args.batch_size, rng):
                     batch_idx = torch.tensor(batch, dtype=torch.int64, device=device)
@@ -1039,34 +993,11 @@ def main() -> int:
                     value_loss_value = float(value_loss.item())
                     update_losses.append(float(loss.item()))
 
-            if ranking_obs is not None and args.ranking_coef > 0:
-                for batch in minibatch_indices(ranking_obs.shape[0], args.batch_size, rng):
-                    batch_idx = torch.tensor(batch, dtype=torch.int64, device=device)
-                    batch_obs = ranking_obs.index_select(0, batch_idx)
-                    batch_better_actions = better_actions.index_select(0, batch_idx)
-                    batch_worse_actions = worse_actions.index_select(0, batch_idx)
-                    batch_weights = ranking_weights.index_select(0, batch_idx)
-                    logits, _values = model(batch_obs)
-                    better_logits = logits.gather(1, batch_better_actions.unsqueeze(1)).squeeze(1)
-                    worse_logits = logits.gather(1, batch_worse_actions.unsqueeze(1)).squeeze(1)
-                    delta = better_logits - worse_logits
-                    ranking_loss = nn.functional.softplus(args.ranking_margin - delta)
-                    ranking_loss = (ranking_loss * batch_weights).sum() / batch_weights.sum().clamp_min(1e-6)
-                    loss = args.ranking_coef * ranking_loss
-
-                    optimizer.zero_grad()
-                    loss.backward()
-                    if args.grad_clip > 0:
-                        torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
-                    optimizer.step()
-                    ranking_loss_value = float(ranking_loss.item())
-                    update_losses.append(float(loss.item()))
-
             if policy_obs is not None and args.imitation_coef > 0:
                 for batch in minibatch_indices(policy_obs.shape[0], args.batch_size, rng):
                     batch_idx = torch.tensor(batch, dtype=torch.int64, device=device)
                     batch_obs = policy_obs.index_select(0, batch_idx)
-                    batch_actions = policy_actions.index_select(0, batch_idx)
+                    batch_actions = torch.argmax(policy_targets.index_select(0, batch_idx), dim=-1)
                     batch_weights = policy_weights.index_select(0, batch_idx)
                     logits, _values = model(batch_obs)
                     imitation_loss = nn.functional.cross_entropy(logits, batch_actions, reduction="none")
@@ -1102,15 +1033,13 @@ def main() -> int:
             "train_fail_pct": 100.0 * train_fail_count / max(1, len(collected)),
             "epsilon": epsilon,
             "loss": sum(update_losses) / max(1, len(update_losses)),
-            "ranking_loss": ranking_loss_value,
+            "policy_loss": policy_loss_value,
             "value_loss": value_loss_value,
             "imitation_loss": imitation_loss_value,
-            "ranking_pairs": 0 if ranking_obs is None else int(ranking_obs.shape[0]),
-            "value_examples": 0 if value_obs is None else int(value_obs.shape[0]),
             "policy_examples": 0 if policy_obs is None else int(policy_obs.shape[0]),
+            "value_examples": 0 if value_obs is None else int(value_obs.shape[0]),
             "policy_bucket_counts": policy_bucket_counts,
             "value_bucket_counts": value_bucket_counts,
-            "ranking_bucket_counts": ranking_bucket_counts,
             "train_bucket_stats": train_bucket_stats,
         }
 
@@ -1186,7 +1115,7 @@ def main() -> int:
             f"train_fail_pct={summary['train_fail_pct']:.2f}% "
             f"train_timeout_pct={summary['train_timeout_pct']:.2f}% "
             f"loss={summary['loss']:.6f} "
-            f"ranking_loss={summary['ranking_loss']:.6f} "
+            f"policy_loss={summary['policy_loss']:.6f} "
             f"value_loss={summary['value_loss']:.6f} "
             f"imitation_loss={summary['imitation_loss']:.6f}"
         )
@@ -1207,8 +1136,7 @@ def main() -> int:
         print(
             "train datasets: "
             f"policy={summary['policy_examples']} {summary['policy_bucket_counts']} "
-            f"value={summary['value_examples']} {summary['value_bucket_counts']} "
-            f"ranking={summary['ranking_pairs']} {summary['ranking_bucket_counts']}"
+            f"value={summary['value_examples']} {summary['value_bucket_counts']}"
         )
         if "eval_bucket_stats" in summary:
             eval_bucket_line = " | ".join(

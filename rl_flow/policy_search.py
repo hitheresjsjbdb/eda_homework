@@ -35,6 +35,7 @@ class EpisodeResult:
 @dataclass
 class DecisionPoint:
     obs: np.ndarray
+    state_return: float
     action_scores: list[tuple[int, float]]
 
 
@@ -176,7 +177,7 @@ def search_candidates(
     branch_topk: int = 4,
     temperature: float = 1.0,
     value_weight: float = 0.3,
-    prior_weight: float = 0.03,
+    prior_weight: float = 0.0,
     gumbel_scale: float = 0.0,
     random_mix_prob: float = 0.0,
     expand_workers: int = 1,
@@ -319,30 +320,32 @@ def search_candidates(
     best_return: dict[int, float] = {}
     for node_id in sorted(node_records.keys(), reverse=True):
         record = node_records[node_id]
-        base_return = record["terminal_return"]
-        if base_return is None:
-            base_return = float(record["bootstrap_return"])
-        child_best = base_return
-        for child_id in record["children"]:
-            child_best = max(child_best, best_return.get(child_id, float(node_records[child_id]["bootstrap_return"])))
-        best_return[node_id] = float(child_best)
+        children = record["children"]
+        if children:
+            child_best = max(
+                best_return.get(child_id, float(node_records[child_id]["bootstrap_return"]))
+                for child_id in children
+            )
+            best_return[node_id] = float(child_best)
+        else:
+            base_return = record["terminal_return"]
+            if base_return is None:
+                base_return = float(record["bootstrap_return"])
+            best_return[node_id] = float(base_return)
 
     decision_points = []
     for node_id, record in node_records.items():
         children = record["children"]
-        if len(children) < 2:
-            continue
         grouped_scores: dict[int, list[float]] = {}
         for child_id in children:
             child_record = node_records[child_id]
             action_idx = int(child_record["action"])
             child_score = best_return.get(child_id, float(child_record["bootstrap_return"]))
             grouped_scores.setdefault(action_idx, []).append(float(child_score))
-        if len(grouped_scores) < 2:
-            continue
         decision_points.append(
             DecisionPoint(
                 obs=np.array(record["obs"], copy=True),
+                state_return=float(best_return.get(node_id, float(record["bootstrap_return"]))),
                 action_scores=[(action_idx, max(scores)) for action_idx, scores in grouped_scores.items()],
             )
         )
@@ -376,7 +379,7 @@ def beam_search(
     branch_topk: int = 4,
     temperature: float = 1.0,
     value_weight: float = 0.3,
-    prior_weight: float = 0.03,
+    prior_weight: float = 0.0,
     expand_workers: int = 1,
     reset_env: bool = True,
 ) -> dict[str, object]:
