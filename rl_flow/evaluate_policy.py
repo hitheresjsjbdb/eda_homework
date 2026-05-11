@@ -148,6 +148,7 @@ def main() -> int:
     parser.add_argument("--timeout-sec", type=float, default=60.0)
     parser.add_argument("--output-json", type=Path, required=True)
     parser.add_argument("--device", type=str, default="auto")
+    parser.add_argument("--mp-start-method", choices=("fork", "spawn", "forkserver", "auto"), default="auto")
     args = parser.parse_args()
 
     case_names = load_split(args.split, args.split_name)
@@ -155,9 +156,13 @@ def main() -> int:
     device = resolve_device(args.device)
     model, _checkpoint = load_policy_checkpoint(args.checkpoint, device)
     num_workers = args.num_workers if args.num_workers > 0 else min(8, os.cpu_count() or 1)
+    mp_start_method = args.mp_start_method
+    if mp_start_method == "auto":
+        mp_start_method = "spawn" if device.type == "cuda" else "fork"
 
     print(f"eval device: {device}")
     print(f"eval workers: {num_workers}")
+    print(f"mp start method: {mp_start_method}")
 
     results = []
     total_cost = 0.0
@@ -173,7 +178,7 @@ def main() -> int:
     error_count = 0
 
     if num_workers > 1 and len(case_names) > 1:
-        ctx = mp.get_context("fork")
+        ctx = mp.get_context(mp_start_method)
         with ProcessPoolExecutor(
             max_workers=num_workers,
             mp_context=ctx,

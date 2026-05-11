@@ -502,8 +502,9 @@ def collect_episodes_parallel(
     gumbel_scale: float,
     random_mix_prob: float,
     expand_workers: int,
+    mp_start_method: str,
 ) -> tuple[list[dict], list[dict]]:
-    ctx = mp.get_context("fork")
+    ctx = mp.get_context(mp_start_method)
     collected: list[dict] = []
     decisions: list[dict] = []
     with ProcessPoolExecutor(
@@ -567,6 +568,7 @@ def evaluate_split(
     small_threshold: float,
     large_threshold: float,
     checkpoint_path: Path | None = None,
+    mp_start_method: str = "fork",
 ) -> dict[str, object]:
     results = []
     total_cost = 0.0
@@ -582,7 +584,7 @@ def evaluate_split(
     if num_workers > 1 and len(case_names) > 1:
         if checkpoint_path is None:
             raise ValueError("checkpoint_path is required for parallel evaluation")
-        ctx = mp.get_context("fork")
+        ctx = mp.get_context(mp_start_method)
         with ProcessPoolExecutor(
             max_workers=num_workers,
             mp_context=ctx,
@@ -798,6 +800,7 @@ def main() -> int:
     parser.add_argument("--num-workers", type=int, default=0)
     parser.add_argument("--eval-workers", type=int, default=0)
     parser.add_argument("--device", type=str, default="auto")
+    parser.add_argument("--mp-start-method", choices=("fork", "spawn", "forkserver", "auto"), default="auto")
     parser.add_argument("--seed", type=int, default=12345)
     parser.add_argument("--timeout-sec", type=float, default=60.0)
     args = parser.parse_args()
@@ -825,10 +828,14 @@ def main() -> int:
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
     num_workers = args.num_workers if args.num_workers > 0 else min(8, os.cpu_count() or 1)
     eval_workers = args.eval_workers if args.eval_workers > 0 else num_workers
+    mp_start_method = args.mp_start_method
+    if mp_start_method == "auto":
+        mp_start_method = "spawn" if device.type == "cuda" else "fork"
 
     print(f"train device: {device}")
     print(f"collect workers: {num_workers}")
     print(f"eval workers: {eval_workers}")
+    print(f"mp start method: {mp_start_method}")
 
     history = []
     archive: dict[str, dict] = {}
@@ -863,6 +870,7 @@ def main() -> int:
                     gumbel_scale=args.search_gumbel_scale,
                     random_mix_prob=args.search_random_mix_prob,
                     expand_workers=args.train_search_workers,
+                    mp_start_method=mp_start_method,
                 )
             else:
                 collected = []
@@ -1133,6 +1141,7 @@ def main() -> int:
                     small_threshold=args.small_cost_threshold,
                     large_threshold=args.large_cost_threshold,
                     checkpoint_path=eval_ckpt,
+                    mp_start_method=mp_start_method,
                 )
             finally:
                 if eval_ckpt.exists():
