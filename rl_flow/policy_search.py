@@ -29,6 +29,7 @@ class EpisodeResult:
     final_depth: int
     final_sequence: str
     final_return: float
+    done_reason: str | None
 
 
 @dataclass
@@ -295,6 +296,7 @@ def search_candidates(
                 final_depth=int(node.final_info["depth"]),
                 final_sequence=str(node.final_info["sequence"]),
                 final_return=_normalized_return(env, final_cost),
+                done_reason=str(node.final_info.get("done_reason")),
             )
         )
     return results

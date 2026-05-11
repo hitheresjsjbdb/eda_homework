@@ -221,11 +221,17 @@ class ImapEnv:
                 "done_reason": None,
                 "sequence_str": sequence_str,
             }
-        except (subprocess.TimeoutExpired, RuntimeError):
+        except subprocess.TimeoutExpired:
             return self._failed_transition(
                 state=state,
                 action=action,
-                reason="action_failed",
+                reason="action_timeout",
+            )
+        except RuntimeError:
+            return self._failed_transition(
+                state=state,
+                action=action,
+                reason="action_error",
             )
 
     def _evaluate(self, sequence: tuple[str, ...], map_command: str) -> EvalSnapshot:

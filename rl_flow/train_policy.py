@@ -233,6 +233,7 @@ def _sample_case_worker(case_name: str, episodes_per_case: int, seed: int) -> li
                 "sequence": episode.final_sequence,
                 "final_return": episode.final_return,
                 "initial_cost": init_cost,
+                "done_reason": episode.done_reason,
             }
         )
     return records
@@ -406,6 +407,8 @@ def evaluate_split(
     ref_depth_gap_sum = 0.0
     ref_count = 0
     exact_ref_matches = 0
+    timeout_count = 0
+    error_count = 0
     model.eval()
 
     if num_workers > 1 and len(case_names) > 1:
@@ -443,6 +446,10 @@ def evaluate_split(
                 results.append(result)
                 total_cost += float(result["cost"])
                 ref = result.get("ref")
+                if result.get("done_reason") == "action_timeout":
+                    timeout_count += 1
+                elif result.get("done_reason") == "action_error":
+                    error_count += 1
                 if ref is not None:
                     ref_count += 1
                     ref_gap_sum += float(result["ref_cost_gap"])
@@ -473,6 +480,10 @@ def evaluate_split(
             case_dir = case_root / case_name
             ref = read_ref_qor(case_dir)
             result["ref"] = ref
+            if result.get("done_reason") == "action_timeout":
+                timeout_count += 1
+            elif result.get("done_reason") == "action_error":
+                error_count += 1
             if ref is not None:
                 ref_cost = 0.6 * ref["level"] + 0.4 * ref["area"]
                 result["ref_cost_gap"] = float(result["cost"]) - ref_cost
@@ -495,6 +506,9 @@ def evaluate_split(
         "avg_ref_depth_gap": ref_depth_gap_sum / max(1, ref_count),
         "ref_count": ref_count,
         "exact_ref_matches": exact_ref_matches,
+        "timeout_pct": 100.0 * timeout_count / max(1, len(results)),
+        "error_pct": 100.0 * error_count / max(1, len(results)),
+        "fail_pct": 100.0 * (timeout_count + error_count) / max(1, len(results)),
         "results": results,
     }
 
@@ -707,6 +721,7 @@ def main() -> int:
                                 "sequence": episode.final_sequence,
                                 "final_return": episode.final_return,
                                 "initial_cost": init_cost,
+                                "done_reason": episode.done_reason,
                             }
                         )
         finally:
@@ -800,11 +815,17 @@ def main() -> int:
         train_avg_cost = sum(float(item["cost"]) for item in collected) / len(collected)
         train_best_cost = min(float(item["cost"]) for item in collected)
         train_avg_return = sum(float(item["final_return"]) for item in collected) / len(collected)
+        train_timeout_count = sum(1 for item in collected if item.get("done_reason") == "action_timeout")
+        train_error_count = sum(1 for item in collected if item.get("done_reason") == "action_error")
+        train_fail_count = train_timeout_count + train_error_count
         summary = {
             "epoch": epoch,
             "train_avg_cost": train_avg_cost,
             "train_best_cost": train_best_cost,
             "train_avg_return": train_avg_return,
+            "train_timeout_pct": 100.0 * train_timeout_count / max(1, len(collected)),
+            "train_error_pct": 100.0 * train_error_count / max(1, len(collected)),
+            "train_fail_pct": 100.0 * train_fail_count / max(1, len(collected)),
             "epsilon": epsilon,
             "loss": sum(update_losses) / max(1, len(update_losses)),
             "ranking_loss": ranking_loss_value,
@@ -847,6 +868,8 @@ def main() -> int:
             summary["eval_avg_ref_area_gap"] = float(eval_summary["avg_ref_area_gap"])
             summary["eval_avg_ref_depth_gap"] = float(eval_summary["avg_ref_depth_gap"])
             summary["eval_exact_ref_matches"] = int(eval_summary["exact_ref_matches"])
+            summary["eval_fail_pct"] = float(eval_summary["fail_pct"])
+            summary["eval_timeout_pct"] = float(eval_summary["timeout_pct"])
             if float(eval_summary["avg_cost"]) < best_eval_cost:
                 best_eval_cost = float(eval_summary["avg_cost"])
                 save_checkpoint(
@@ -876,6 +899,8 @@ def main() -> int:
             f"train_avg_return={train_avg_return:.4f} "
             f"train_avg_cost={train_avg_cost:.4f} "
             f"train_best_cost={train_best_cost:.4f} "
+            f"train_fail_pct={summary['train_fail_pct']:.2f}% "
+            f"train_timeout_pct={summary['train_timeout_pct']:.2f}% "
             f"loss={summary['loss']:.6f} "
             f"ranking_loss={summary['ranking_loss']:.6f} "
             f"imitation_loss={summary['imitation_loss']:.6f}"
@@ -884,6 +909,8 @@ def main() -> int:
             status += (
                 f" eval_avg_cost={summary['eval_avg_cost']:.4f}"
                 f" eval_avg_ref_gap={summary['eval_avg_ref_gap']:.4f}"
+                f" eval_fail_pct={summary['eval_fail_pct']:.2f}%"
+                f" eval_timeout_pct={summary['eval_timeout_pct']:.2f}%"
                 f" eval_exact_ref_matches={summary['eval_exact_ref_matches']}"
             )
         print(status)

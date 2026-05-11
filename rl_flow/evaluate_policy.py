@@ -157,6 +157,8 @@ def main() -> int:
     infer_better_count = 0
     ref_better_count = 0
     tie_count = 0
+    timeout_count = 0
+    error_count = 0
 
     if num_workers > 1 and len(case_names) > 1:
         ctx = mp.get_context("fork")
@@ -184,6 +186,10 @@ def main() -> int:
                     print(f"eval worker failed: {exc}")
                     continue
                 ref = item["ref"]
+                if item.get("done_reason") == "action_timeout":
+                    timeout_count += 1
+                elif item.get("done_reason") == "action_error":
+                    error_count += 1
                 if ref is not None:
                     ref_cost = 0.6 * ref["level"] + 0.4 * ref["area"]
                     ref_count += 1
@@ -241,7 +247,12 @@ def main() -> int:
                 "depth": int(final_info["depth"]),
                 "sequence": str(final_info["sequence"]),
                 "ref": ref,
+                "done_reason": final_info.get("done_reason"),
             }
+            if item.get("done_reason") == "action_timeout":
+                timeout_count += 1
+            elif item.get("done_reason") == "action_error":
+                error_count += 1
             if ref is not None:
                 item["ref_area_gap"] = int(final_info["area"]) - ref["area"]
                 item["ref_depth_gap"] = int(final_info["depth"]) - ref["level"]
@@ -277,6 +288,9 @@ def main() -> int:
         "infer_better_pct": 100.0 * infer_better_count / max(1, ref_count),
         "ref_better_pct": 100.0 * ref_better_count / max(1, ref_count),
         "tie_pct": 100.0 * tie_count / max(1, ref_count),
+        "timeout_pct": 100.0 * timeout_count / max(1, len(results)),
+        "error_pct": 100.0 * error_count / max(1, len(results)),
+        "fail_pct": 100.0 * (timeout_count + error_count) / max(1, len(results)),
         "results": results,
     }
     args.output_json.parent.mkdir(parents=True, exist_ok=True)
@@ -308,6 +322,8 @@ def main() -> int:
         f"avg_cost={summary['avg_cost']:.3f} "
         f"avg_ref_gap={summary['avg_ref_gap']:.3f} "
         f"exact_ref_matches={exact_ref_matches} "
+        f"fail={summary['fail_pct']:.2f}% "
+        f"timeout={summary['timeout_pct']:.2f}% "
         f"infer_better={infer_better_count}/{max(1, ref_count)} ({summary['infer_better_pct']:.2f}%) "
         f"ref_better={ref_better_count}/{max(1, ref_count)} ({summary['ref_better_pct']:.2f}%) "
         f"tie={tie_count}/{max(1, ref_count)} ({summary['tie_pct']:.2f}%)"
