@@ -45,6 +45,7 @@ _SAMPLER_LABEL_BRANCH_TOPK = 4
 _SAMPLER_LABEL_GUMBEL_SCALE = 0.0
 _SAMPLER_LABEL_RANDOM_MIX_PROB = 0.0
 _SAMPLER_LABEL_EXPAND_WORKERS = 1
+_SAMPLER_SHARED_LABEL_SEARCH = True
 _SAMPLER_SMALL_THRESHOLD = 200.0
 _SAMPLER_LARGE_THRESHOLD = 1000.0
 _EVAL_MODEL: PolicyValueNet | None = None
@@ -326,6 +327,7 @@ def _init_sample_worker(
     label_gumbel_scale: float,
     label_random_mix_prob: float,
     label_expand_workers: int,
+    shared_label_search: bool,
     small_threshold: float,
     large_threshold: float,
 ) -> None:
@@ -347,6 +349,7 @@ def _init_sample_worker(
     global _SAMPLER_LABEL_GUMBEL_SCALE
     global _SAMPLER_LABEL_RANDOM_MIX_PROB
     global _SAMPLER_LABEL_EXPAND_WORKERS
+    global _SAMPLER_SHARED_LABEL_SEARCH
     global _SAMPLER_SMALL_THRESHOLD
     global _SAMPLER_LARGE_THRESHOLD
 
@@ -372,6 +375,7 @@ def _init_sample_worker(
     _SAMPLER_LABEL_GUMBEL_SCALE = label_gumbel_scale
     _SAMPLER_LABEL_RANDOM_MIX_PROB = label_random_mix_prob
     _SAMPLER_LABEL_EXPAND_WORKERS = label_expand_workers
+    _SAMPLER_SHARED_LABEL_SEARCH = shared_label_search
     _SAMPLER_SMALL_THRESHOLD = small_threshold
     _SAMPLER_LARGE_THRESHOLD = large_threshold
 
@@ -399,6 +403,18 @@ def _sample_case_worker(case_name: str, episodes_per_case: int, seed: int) -> di
         _SAMPLER_BEAM_WIDTH,
         _SAMPLER_BRANCH_TOPK,
     )
+    if _SAMPLER_SHARED_LABEL_SEARCH:
+        beam_width = max(beam_width, _SAMPLER_LABEL_BEAM_WIDTH)
+        branch_topk = max(branch_topk, _SAMPLER_LABEL_BRANCH_TOPK)
+        temperature = _SAMPLER_LABEL_TEMPERATURE
+        gumbel_scale = max(_SAMPLER_GUMBEL_SCALE, _SAMPLER_LABEL_GUMBEL_SCALE)
+        random_mix_prob = max(_SAMPLER_RANDOM_MIX_PROB, _SAMPLER_LABEL_RANDOM_MIX_PROB)
+        expand_workers = max(_SAMPLER_EXPAND_WORKERS, _SAMPLER_LABEL_EXPAND_WORKERS)
+    else:
+        temperature = _SAMPLER_TEMPERATURE
+        gumbel_scale = _SAMPLER_GUMBEL_SCALE
+        random_mix_prob = _SAMPLER_RANDOM_MIX_PROB
+        expand_workers = _SAMPLER_EXPAND_WORKERS
     env.max_steps = max_steps
 
     records: list[dict] = []
@@ -411,10 +427,10 @@ def _sample_case_worker(case_name: str, episodes_per_case: int, seed: int) -> di
         num_candidates=episodes_per_case,
         beam_width=beam_width,
         branch_topk=branch_topk,
-        temperature=_SAMPLER_TEMPERATURE,
-        gumbel_scale=_SAMPLER_GUMBEL_SCALE,
-        random_mix_prob=_SAMPLER_RANDOM_MIX_PROB,
-        expand_workers=_SAMPLER_EXPAND_WORKERS,
+        temperature=temperature,
+        gumbel_scale=gumbel_scale,
+        random_mix_prob=random_mix_prob,
+        expand_workers=expand_workers,
         reset_env=False,
         small_threshold=_SAMPLER_SMALL_THRESHOLD,
         large_threshold=_SAMPLER_LARGE_THRESHOLD,
@@ -434,60 +450,70 @@ def _sample_case_worker(case_name: str, episodes_per_case: int, seed: int) -> di
                 "done_reason": episode.done_reason,
             }
         )
-    env.reset()
-    if env.initial_snapshot is None:
-        raise RuntimeError("failed to initialize environment")
-    label_init_cost = float(env.initial_snapshot.cost)
-    label_max_steps, label_beam_width, label_branch_topk = adapt_search_budget(
-        label_init_cost,
-        _SAMPLER_MAX_STEPS,
-        _SAMPLER_LABEL_BEAM_WIDTH,
-        _SAMPLER_LABEL_BRANCH_TOPK,
-    )
-    env.max_steps = label_max_steps
-    label_candidates, label_decisions = search_candidates(
-        env=env,
-        model=_SAMPLER_MODEL,
-        device=torch.device("cpu"),
-        rng=random.Random(seed + 9173),
-        num_candidates=1,
-        beam_width=label_beam_width,
-        branch_topk=label_branch_topk,
-        temperature=_SAMPLER_LABEL_TEMPERATURE,
-        gumbel_scale=_SAMPLER_LABEL_GUMBEL_SCALE,
-        random_mix_prob=_SAMPLER_LABEL_RANDOM_MIX_PROB,
-        expand_workers=_SAMPLER_LABEL_EXPAND_WORKERS,
-        reset_env=False,
-        small_threshold=_SAMPLER_SMALL_THRESHOLD,
-        large_threshold=_SAMPLER_LARGE_THRESHOLD,
-    )
-    if label_candidates:
-        best_label = min(label_candidates, key=lambda item: float(item.final_cost))
-        records.append(
-            {
-                "case_name": case_name,
-                "source": "teacher",
-                "steps": best_label.steps,
-                "cost": best_label.final_cost,
-                "area": best_label.final_area,
-                "depth": best_label.final_depth,
-                "sequence": best_label.final_sequence,
-                "final_return": best_label.final_return,
-                "initial_cost": label_init_cost,
-                "done_reason": best_label.done_reason,
-            }
-        )
-    for decision in label_decisions:
+    for decision in decisions:
         decision_records.append(
             {
                 "case_name": case_name,
-                "source": "teacher",
-                "initial_cost": label_init_cost,
+                "source": "explore",
+                "initial_cost": init_cost,
                 "obs": np.array(decision.obs, copy=True),
                 "state_return": float(decision.state_return),
                 "action_scores": [(int(action), float(score)) for action, score in decision.action_scores],
             }
         )
+    if _SAMPLER_SHARED_LABEL_SEARCH:
+        shared_candidates, shared_decisions = candidates, decisions
+        label_init_cost = init_cost
+        for decision in shared_decisions:
+            decision_records.append(
+                {
+                    "case_name": case_name,
+                    "source": "teacher",
+                    "initial_cost": label_init_cost,
+                    "obs": np.array(decision.obs, copy=True),
+                    "state_return": float(decision.state_return),
+                    "action_scores": [(int(action), float(score)) for action, score in decision.action_scores],
+                }
+            )
+    else:
+        env.reset()
+        if env.initial_snapshot is None:
+            raise RuntimeError("failed to initialize environment")
+        label_init_cost = float(env.initial_snapshot.cost)
+        label_max_steps, label_beam_width, label_branch_topk = adapt_search_budget(
+            label_init_cost,
+            _SAMPLER_MAX_STEPS,
+            _SAMPLER_LABEL_BEAM_WIDTH,
+            _SAMPLER_LABEL_BRANCH_TOPK,
+        )
+        env.max_steps = label_max_steps
+        shared_candidates, shared_decisions = search_candidates(
+            env=env,
+            model=_SAMPLER_MODEL,
+            device=torch.device("cpu"),
+            rng=random.Random(seed + 9173),
+            num_candidates=1,
+            beam_width=label_beam_width,
+            branch_topk=label_branch_topk,
+            temperature=_SAMPLER_LABEL_TEMPERATURE,
+            gumbel_scale=_SAMPLER_LABEL_GUMBEL_SCALE,
+            random_mix_prob=_SAMPLER_LABEL_RANDOM_MIX_PROB,
+            expand_workers=_SAMPLER_LABEL_EXPAND_WORKERS,
+            reset_env=False,
+            small_threshold=_SAMPLER_SMALL_THRESHOLD,
+            large_threshold=_SAMPLER_LARGE_THRESHOLD,
+        )
+        for decision in shared_decisions:
+            decision_records.append(
+                {
+                    "case_name": case_name,
+                    "source": "teacher",
+                    "initial_cost": label_init_cost,
+                    "obs": np.array(decision.obs, copy=True),
+                    "state_return": float(decision.state_return),
+                    "action_scores": [(int(action), float(score)) for action, score in decision.action_scores],
+                }
+            )
     return {"episodes": records, "decisions": decision_records}
 
 
@@ -605,6 +631,7 @@ def collect_episodes_parallel(
     label_gumbel_scale: float,
     label_random_mix_prob: float,
     label_expand_workers: int,
+    shared_label_search: bool,
     small_threshold: float,
     large_threshold: float,
     mp_start_method: str,
@@ -634,6 +661,7 @@ def collect_episodes_parallel(
             label_gumbel_scale,
             label_random_mix_prob,
             label_expand_workers,
+            shared_label_search,
             small_threshold,
             large_threshold,
         ),
@@ -920,6 +948,7 @@ def main() -> int:
     parser.add_argument("--label-search-workers", type=int, default=1)
     parser.add_argument("--label-gumbel-scale", type=float, default=0.0)
     parser.add_argument("--label-random-mix-prob", type=float, default=0.0)
+    parser.add_argument("--separate-label-search", action="store_true")
     parser.add_argument("--search-gumbel-scale", type=float, default=0.4)
     parser.add_argument("--search-random-mix-prob", type=float, default=0.1)
     parser.add_argument("--grad-clip", type=float, default=5.0)
@@ -962,6 +991,7 @@ def main() -> int:
     mp_start_method = args.mp_start_method
     if mp_start_method == "auto":
         mp_start_method = "spawn" if device.type == "cuda" else "fork"
+    shared_label_search = not args.separate_label_search
 
     print(f"train device: {device}")
     print(f"collect workers: {num_workers}")
@@ -1008,6 +1038,7 @@ def main() -> int:
                     label_gumbel_scale=args.label_gumbel_scale,
                     label_random_mix_prob=args.label_random_mix_prob,
                     label_expand_workers=args.label_search_workers,
+                    shared_label_search=shared_label_search,
                     small_threshold=args.small_cost_threshold,
                     large_threshold=args.large_cost_threshold,
                     mp_start_method=mp_start_method,
@@ -1036,6 +1067,18 @@ def main() -> int:
                         args.train_beam_width,
                         args.train_branch_topk,
                     )
+                    if shared_label_search:
+                        beam_width = max(beam_width, args.label_beam_width)
+                        branch_topk = max(branch_topk, args.label_branch_topk)
+                        temperature = args.label_temperature
+                        gumbel_scale = max(args.search_gumbel_scale, args.label_gumbel_scale)
+                        random_mix_prob = max(args.search_random_mix_prob, args.label_random_mix_prob)
+                        expand_workers = max(args.train_search_workers, args.label_search_workers)
+                    else:
+                        temperature = args.temperature
+                        gumbel_scale = args.search_gumbel_scale
+                        random_mix_prob = args.search_random_mix_prob
+                        expand_workers = args.train_search_workers
                     env.max_steps = max_steps
                     local_rng = random.Random(args.seed + epoch * 1000003 + case_index * 100003)
                     candidates, decisions = search_candidates(
@@ -1046,10 +1089,10 @@ def main() -> int:
                         num_candidates=args.episodes_per_case,
                         beam_width=beam_width,
                         branch_topk=branch_topk,
-                        temperature=args.temperature,
-                        gumbel_scale=args.search_gumbel_scale,
-                        random_mix_prob=args.search_random_mix_prob,
-                        expand_workers=args.train_search_workers,
+                        temperature=temperature,
+                        gumbel_scale=gumbel_scale,
+                        random_mix_prob=random_mix_prob,
+                        expand_workers=expand_workers,
                         reset_env=False,
                         small_threshold=args.small_cost_threshold,
                         large_threshold=args.large_cost_threshold,
@@ -1080,61 +1123,74 @@ def main() -> int:
                                 "action_scores": [(int(action), float(score)) for action, score in decision.action_scores],
                             }
                         )
-                    env.reset()
-                    if env.initial_snapshot is None:
-                        raise RuntimeError("failed to initialize environment")
-                    label_init_cost = float(env.initial_snapshot.cost)
-                    label_max_steps, label_beam_width, label_branch_topk = adapt_search_budget(
-                        label_init_cost,
-                        args.max_steps,
-                        args.label_beam_width,
-                        args.label_branch_topk,
-                    )
-                    env.max_steps = label_max_steps
-                    label_rng = random.Random(args.seed + epoch * 1000003 + case_index * 100003 + 9173)
-                    label_candidates, label_decisions = search_candidates(
-                        env=env,
-                        model=model,
-                        device=device,
-                        rng=label_rng,
-                        num_candidates=1,
-                        beam_width=label_beam_width,
-                        branch_topk=label_branch_topk,
-                        temperature=args.label_temperature,
-                        gumbel_scale=args.label_gumbel_scale,
-                        random_mix_prob=args.label_random_mix_prob,
-                        expand_workers=args.label_search_workers,
-                        reset_env=False,
-                        small_threshold=args.small_cost_threshold,
-                        large_threshold=args.large_cost_threshold,
-                    )
-                    if label_candidates:
-                        best_label = min(label_candidates, key=lambda item: float(item.final_cost))
-                        collected.append(
-                            {
-                                "case_name": case_name,
-                                "source": "teacher",
-                                "steps": best_label.steps,
-                                "cost": best_label.final_cost,
-                                "area": best_label.final_area,
-                                "depth": best_label.final_depth,
-                                "sequence": best_label.final_sequence,
-                                "final_return": best_label.final_return,
-                                "initial_cost": label_init_cost,
-                                "done_reason": best_label.done_reason,
-                            }
+                    if shared_label_search:
+                        for decision in decisions:
+                            collected_decisions.append(
+                                {
+                                    "case_name": case_name,
+                                    "source": "teacher",
+                                    "initial_cost": init_cost,
+                                    "obs": np.array(decision.obs, copy=True),
+                                    "state_return": float(decision.state_return),
+                                    "action_scores": [(int(action), float(score)) for action, score in decision.action_scores],
+                                }
+                            )
+                    else:
+                        env.reset()
+                        if env.initial_snapshot is None:
+                            raise RuntimeError("failed to initialize environment")
+                        label_init_cost = float(env.initial_snapshot.cost)
+                        label_max_steps, label_beam_width, label_branch_topk = adapt_search_budget(
+                            label_init_cost,
+                            args.max_steps,
+                            args.label_beam_width,
+                            args.label_branch_topk,
                         )
-                    for decision in label_decisions:
-                        collected_decisions.append(
-                            {
-                                "case_name": case_name,
-                                "source": "teacher",
-                                "initial_cost": label_init_cost,
-                                "obs": np.array(decision.obs, copy=True),
-                                "state_return": float(decision.state_return),
-                                "action_scores": [(int(action), float(score)) for action, score in decision.action_scores],
-                            }
+                        env.max_steps = label_max_steps
+                        label_rng = random.Random(args.seed + epoch * 1000003 + case_index * 100003 + 9173)
+                        label_candidates, label_decisions = search_candidates(
+                            env=env,
+                            model=model,
+                            device=device,
+                            rng=label_rng,
+                            num_candidates=1,
+                            beam_width=label_beam_width,
+                            branch_topk=label_branch_topk,
+                            temperature=args.label_temperature,
+                            gumbel_scale=args.label_gumbel_scale,
+                            random_mix_prob=args.label_random_mix_prob,
+                            expand_workers=args.label_search_workers,
+                            reset_env=False,
+                            small_threshold=args.small_cost_threshold,
+                            large_threshold=args.large_cost_threshold,
                         )
+                        if label_candidates:
+                            best_label = min(label_candidates, key=lambda item: float(item.final_cost))
+                            collected.append(
+                                {
+                                    "case_name": case_name,
+                                    "source": "teacher",
+                                    "steps": best_label.steps,
+                                    "cost": best_label.final_cost,
+                                    "area": best_label.final_area,
+                                    "depth": best_label.final_depth,
+                                    "sequence": best_label.final_sequence,
+                                    "final_return": best_label.final_return,
+                                    "initial_cost": label_init_cost,
+                                    "done_reason": best_label.done_reason,
+                                }
+                            )
+                        for decision in label_decisions:
+                            collected_decisions.append(
+                                {
+                                    "case_name": case_name,
+                                    "source": "teacher",
+                                    "initial_cost": label_init_cost,
+                                    "obs": np.array(decision.obs, copy=True),
+                                    "state_return": float(decision.state_return),
+                                    "action_scores": [(int(action), float(score)) for action, score in decision.action_scores],
+                                }
+                            )
         finally:
             if sampling_ckpt.exists():
                 sampling_ckpt.unlink()
