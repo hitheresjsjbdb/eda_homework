@@ -185,6 +185,33 @@ def _simulate_branch(
     return env.simulate_from_state(state, int(action_idx))
 
 
+def _is_redundant_action(env: ImapEnv, state: SearchState, action_idx: int) -> bool:
+    action = env.actions[action_idx]
+    if action.terminal:
+        return False
+    if state.last_action_index < 0:
+        return False
+
+    prev = env.actions[state.last_action_index]
+    if prev.terminal:
+        return False
+    if prev.name == action.name:
+        return True
+    if prev.name.startswith("lut_opt") and action.name.startswith("lut_opt"):
+        return True
+    if prev.name.startswith("balance") and action.name.startswith("balance"):
+        return True
+    if (
+        state.step_index >= 2
+        and prev.name.startswith("balance")
+        and action.name in {"rewrite_lp", "rewrite_lpz", "rewrite_p12_lp", "rewrite_p12_lpz", "refactor_lp", "refactor_lpz"}
+    ):
+        recent = tuple(state.sequence[-3:]) if len(state.sequence) >= 3 else tuple(state.sequence)
+        if action.commands and action.commands[0] in recent:
+            return True
+    return False
+
+
 def search_candidates(
     env: ImapEnv,
     model: PolicyValueNet,
@@ -262,6 +289,14 @@ def search_candidates(
                 gumbel_scale=gumbel_scale,
                 random_mix_prob=random_mix_prob,
             )
+            chosen_indices = [
+                action_idx
+                for action_idx in chosen_indices
+                if not _is_redundant_action(env, node.state, int(action_idx))
+            ]
+            if not chosen_indices:
+                fallback = int(torch.argmax(probs).item())
+                chosen_indices = [fallback]
 
             for action_idx in chosen_indices:
                 pending.append(
@@ -453,6 +488,8 @@ def beam_search(
             top_probs, top_indices = torch.topk(probs, k=topk)
 
             for prob, action_idx in zip(top_probs.tolist(), top_indices.tolist()):
+                if _is_redundant_action(env, node.state, int(action_idx)):
+                    continue
                 pending.append(
                     PendingExpansion(
                         node=node,
@@ -460,6 +497,17 @@ def beam_search(
                         probs=probs,
                         entropy=0.0,
                         action_idx=int(action_idx),
+                    )
+                )
+            if not pending or pending[-1].node is not node:
+                fallback = int(torch.argmax(probs).item())
+                pending.append(
+                    PendingExpansion(
+                        node=node,
+                        node_obs=np.array(node_obs, copy=True),
+                        probs=probs,
+                        entropy=0.0,
+                        action_idx=fallback,
                     )
                 )
 

@@ -49,6 +49,8 @@ _SAMPLER_SHARED_LABEL_SEARCH = False
 _SAMPLER_SHARED_LABEL_USE_TEACHER_BUDGET = False
 _SAMPLER_SMALL_THRESHOLD = 200.0
 _SAMPLER_LARGE_THRESHOLD = 1000.0
+_SAMPLER_TEACHER_MIN_COST = 200.0
+_SAMPLER_PROBE_MAP_COMMAND = "map_fpga -P 12 -C 6 -G 1 -L 2"
 _EVAL_MODEL: PolicyValueNet | None = None
 _EVAL_ACTIONS = None
 _EVAL_CASE_ROOT: Path | None = None
@@ -61,6 +63,7 @@ _EVAL_TEMPERATURE = 1.0
 _EVAL_EXPAND_WORKERS = 1
 _EVAL_SMALL_THRESHOLD = 200.0
 _EVAL_LARGE_THRESHOLD = 1000.0
+_EVAL_PROBE_MAP_COMMAND = "map_fpga -P 12 -C 6 -G 1 -L 2"
 
 
 def _group_training_episodes(
@@ -335,6 +338,8 @@ def _init_sample_worker(
     shared_label_use_teacher_budget: bool,
     small_threshold: float,
     large_threshold: float,
+    teacher_min_cost: float,
+    probe_map_command: str,
 ) -> None:
     global _SAMPLER_MODEL
     global _SAMPLER_ACTIONS
@@ -358,6 +363,8 @@ def _init_sample_worker(
     global _SAMPLER_SHARED_LABEL_USE_TEACHER_BUDGET
     global _SAMPLER_SMALL_THRESHOLD
     global _SAMPLER_LARGE_THRESHOLD
+    global _SAMPLER_TEACHER_MIN_COST
+    global _SAMPLER_PROBE_MAP_COMMAND
 
     os.environ["OMP_NUM_THREADS"] = "1"
     os.environ["OPENBLAS_NUM_THREADS"] = "1"
@@ -385,6 +392,8 @@ def _init_sample_worker(
     _SAMPLER_SHARED_LABEL_USE_TEACHER_BUDGET = shared_label_use_teacher_budget
     _SAMPLER_SMALL_THRESHOLD = small_threshold
     _SAMPLER_LARGE_THRESHOLD = large_threshold
+    _SAMPLER_TEACHER_MIN_COST = teacher_min_cost
+    _SAMPLER_PROBE_MAP_COMMAND = probe_map_command
 
 
 def _sample_case_worker(case_name: str, episodes_per_case: int, seed: int) -> dict[str, list[dict]]:
@@ -399,6 +408,7 @@ def _sample_case_worker(case_name: str, episodes_per_case: int, seed: int) -> di
         actions=_SAMPLER_ACTIONS,
         max_steps=_SAMPLER_MAX_STEPS,
         timeout_sec=_SAMPLER_TIMEOUT_SEC,
+        probe_map_command=_SAMPLER_PROBE_MAP_COMMAND,
     )
     env.reset()
     if env.initial_snapshot is None:
@@ -468,7 +478,8 @@ def _sample_case_worker(case_name: str, episodes_per_case: int, seed: int) -> di
                 "action_scores": [(int(action), float(score)) for action, score in decision.action_scores],
             }
         )
-    if _SAMPLER_SHARED_LABEL_SEARCH:
+    use_shared_teacher = _SAMPLER_SHARED_LABEL_SEARCH or init_cost < _SAMPLER_TEACHER_MIN_COST
+    if use_shared_teacher:
         shared_candidates, shared_decisions = candidates, decisions
         label_init_cost = init_cost
         for decision in shared_decisions:
@@ -552,6 +563,7 @@ def _init_eval_worker(
     expand_workers: int,
     small_threshold: float,
     large_threshold: float,
+    probe_map_command: str,
 ) -> None:
     global _EVAL_MODEL
     global _EVAL_ACTIONS
@@ -565,6 +577,7 @@ def _init_eval_worker(
     global _EVAL_EXPAND_WORKERS
     global _EVAL_SMALL_THRESHOLD
     global _EVAL_LARGE_THRESHOLD
+    global _EVAL_PROBE_MAP_COMMAND
 
     os.environ["OMP_NUM_THREADS"] = "1"
     os.environ["OPENBLAS_NUM_THREADS"] = "1"
@@ -582,6 +595,7 @@ def _init_eval_worker(
     _EVAL_EXPAND_WORKERS = expand_workers
     _EVAL_SMALL_THRESHOLD = small_threshold
     _EVAL_LARGE_THRESHOLD = large_threshold
+    _EVAL_PROBE_MAP_COMMAND = probe_map_command
 
 
 def _evaluate_case_worker(case_name: str) -> dict[str, object]:
@@ -595,6 +609,7 @@ def _evaluate_case_worker(case_name: str) -> dict[str, object]:
         actions=_EVAL_ACTIONS,
         max_steps=_EVAL_MAX_STEPS,
         timeout_sec=_EVAL_TIMEOUT_SEC,
+        probe_map_command=_EVAL_PROBE_MAP_COMMAND,
     )
     env.reset()
     if env.initial_snapshot is None:
@@ -658,6 +673,8 @@ def collect_episodes_parallel(
     shared_label_use_teacher_budget: bool,
     small_threshold: float,
     large_threshold: float,
+    teacher_min_cost: float,
+    probe_map_command: str,
     mp_start_method: str,
 ) -> tuple[list[dict], list[dict]]:
     ctx = mp.get_context(mp_start_method)
@@ -689,6 +706,8 @@ def collect_episodes_parallel(
             shared_label_use_teacher_budget,
             small_threshold,
             large_threshold,
+            teacher_min_cost,
+            probe_map_command,
         ),
     ) as executor:
         futures = []
@@ -735,6 +754,7 @@ def evaluate_split(
     large_threshold: float,
     checkpoint_path: Path | None = None,
     mp_start_method: str = "fork",
+    probe_map_command: str = "map_fpga -P 12 -C 6 -G 1 -L 2",
 ) -> dict[str, object]:
     results = []
     total_cost = 0.0
@@ -767,6 +787,7 @@ def evaluate_split(
                 expand_workers,
                 small_threshold,
                 large_threshold,
+                probe_map_command,
             ),
         ) as executor:
             futures = [executor.submit(_evaluate_case_worker, case_name) for case_name in case_names]
@@ -804,6 +825,7 @@ def evaluate_split(
                 actions=actions,
                 max_steps=max_steps,
                 timeout_sec=timeout_sec,
+                probe_map_command=probe_map_command,
             )
             env.reset()
             if env.initial_snapshot is None:
@@ -989,6 +1011,8 @@ def main() -> int:
     parser.add_argument("--mp-start-method", choices=("fork", "spawn", "forkserver", "auto"), default="auto")
     parser.add_argument("--seed", type=int, default=12345)
     parser.add_argument("--timeout-sec", type=float, default=60.0)
+    parser.add_argument("--teacher-min-cost", type=float, default=200.0)
+    parser.add_argument("--probe-map-command", type=str, default="map_fpga -P 12 -C 6 -G 1 -L 2")
     args = parser.parse_args()
 
     rng = random.Random(args.seed)
@@ -1006,6 +1030,7 @@ def main() -> int:
         actions=actions,
         max_steps=args.max_steps,
         timeout_sec=args.timeout_sec,
+        probe_map_command=args.probe_map_command,
     )
     obs_dim = int(probe_env.reset().shape[0])
     action_dim = len(actions)
@@ -1078,6 +1103,8 @@ def main() -> int:
                     shared_label_use_teacher_budget=shared_label_use_teacher_budget,
                     small_threshold=args.small_cost_threshold,
                     large_threshold=args.large_cost_threshold,
+                    teacher_min_cost=args.teacher_min_cost,
+                    probe_map_command=args.probe_map_command,
                     mp_start_method=mp_start_method,
                 )
             else:
@@ -1093,6 +1120,7 @@ def main() -> int:
                         actions=actions,
                         max_steps=args.max_steps,
                         timeout_sec=args.timeout_sec,
+                        probe_map_command=args.probe_map_command,
                     )
                     env.reset()
                     if env.initial_snapshot is None:
@@ -1160,7 +1188,8 @@ def main() -> int:
                                 "action_scores": [(int(action), float(score)) for action, score in decision.action_scores],
                             }
                         )
-                    if shared_label_search:
+                    use_shared_teacher = shared_label_search or init_cost < args.teacher_min_cost
+                    if use_shared_teacher:
                         for decision in decisions:
                             collected_decisions.append(
                                 {
@@ -1411,6 +1440,7 @@ def main() -> int:
                     large_threshold=args.large_cost_threshold,
                     checkpoint_path=eval_ckpt,
                     mp_start_method=mp_start_method,
+                    probe_map_command=args.probe_map_command,
                 )
             finally:
                 if eval_ckpt.exists():

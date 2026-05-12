@@ -32,6 +32,7 @@ _EVAL_TEMPERATURE = 1.0
 _EVAL_EXPAND_WORKERS = 1
 _EVAL_SMALL_THRESHOLD = 200.0
 _EVAL_LARGE_THRESHOLD = 1000.0
+_EVAL_PROBE_MAP_COMMAND = "map_fpga -P 12 -C 6 -G 1 -L 2"
 
 
 def _init_eval_worker(
@@ -46,6 +47,7 @@ def _init_eval_worker(
     expand_workers: int,
     small_threshold: float,
     large_threshold: float,
+    probe_map_command: str,
 ) -> None:
     global _EVAL_MODEL
     global _EVAL_ACTIONS
@@ -59,6 +61,7 @@ def _init_eval_worker(
     global _EVAL_EXPAND_WORKERS
     global _EVAL_SMALL_THRESHOLD
     global _EVAL_LARGE_THRESHOLD
+    global _EVAL_PROBE_MAP_COMMAND
 
     os.environ["OMP_NUM_THREADS"] = "1"
     os.environ["OPENBLAS_NUM_THREADS"] = "1"
@@ -76,6 +79,7 @@ def _init_eval_worker(
     _EVAL_EXPAND_WORKERS = expand_workers
     _EVAL_SMALL_THRESHOLD = small_threshold
     _EVAL_LARGE_THRESHOLD = large_threshold
+    _EVAL_PROBE_MAP_COMMAND = probe_map_command
 
 
 def _evaluate_case_worker(case_name: str) -> dict[str, object]:
@@ -90,6 +94,7 @@ def _evaluate_case_worker(case_name: str) -> dict[str, object]:
         actions=_EVAL_ACTIONS,
         max_steps=_EVAL_MAX_STEPS,
         timeout_sec=_EVAL_TIMEOUT_SEC,
+        probe_map_command=_EVAL_PROBE_MAP_COMMAND,
     )
     env.reset()
     if env.initial_snapshot is None:
@@ -151,6 +156,7 @@ def main() -> int:
     parser.add_argument("--output-json", type=Path, required=True)
     parser.add_argument("--device", type=str, default="auto")
     parser.add_argument("--mp-start-method", choices=("fork", "spawn", "forkserver", "auto"), default="auto")
+    parser.add_argument("--probe-map-command", type=str, default="map_fpga -P 12 -C 6 -G 1 -L 2")
     args = parser.parse_args()
 
     case_names = load_split(args.split, args.split_name)
@@ -203,6 +209,7 @@ def main() -> int:
                 args.search_workers,
                 args.small_cost_threshold,
                 args.large_cost_threshold,
+                args.probe_map_command,
             ),
         ) as executor:
             futures = [executor.submit(_evaluate_case_worker, case_name) for case_name in case_names]
@@ -243,6 +250,7 @@ def main() -> int:
                 actions=actions,
                 max_steps=args.max_steps,
                 timeout_sec=args.timeout_sec,
+                probe_map_command=args.probe_map_command,
             )
             env.reset()
             if env.initial_snapshot is None:

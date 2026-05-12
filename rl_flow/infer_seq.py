@@ -30,6 +30,7 @@ def main() -> int:
     parser.add_argument("--large-cost-threshold", type=float, default=1000.0)
     parser.add_argument("--timeout-sec", type=float, default=60.0)
     parser.add_argument("--device", type=str, default="auto")
+    parser.add_argument("--probe-map-command", type=str, default="map_fpga -P 12 -C 6 -G 1 -L 2")
     args = parser.parse_args()
 
     device = resolve_device(args.device)
@@ -44,6 +45,7 @@ def main() -> int:
         actions=actions,
         max_steps=args.max_steps,
         timeout_sec=args.timeout_sec,
+        probe_map_command=args.probe_map_command,
     )
     env.reset()
     if env.initial_snapshot is None:
