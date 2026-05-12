@@ -117,6 +117,8 @@ def build_case_buckets(
 def sample_cases_for_epoch(
     case_buckets: dict[str, list[str]],
     cases_per_epoch: int,
+    case_memory: dict[str, dict[str, object]],
+    epoch: int,
     rng: random.Random,
 ) -> tuple[list[str], dict[str, int]]:
     all_cases = [case_name for bucket in ("small", "medium", "large") for case_name in case_buckets.get(bucket, [])]
@@ -154,11 +156,69 @@ def sample_cases_for_epoch(
         cases = list(case_buckets.get(bucket, []))
         if not cases or target_counts[bucket] <= 0:
             continue
-        chosen = rng.sample(cases, target_counts[bucket])
+        unseen = [case_name for case_name in cases if case_name not in case_memory]
+        chosen = []
+        unseen_take = min(target_counts[bucket], len(unseen))
+        if unseen_take > 0:
+            chosen.extend(rng.sample(unseen, unseen_take))
+        remaining = target_counts[bucket] - len(chosen)
+        if remaining > 0:
+            seen_candidates = [case_name for case_name in cases if case_name not in chosen]
+            chosen.extend(
+                weighted_case_sample(
+                    seen_candidates,
+                    case_memory,
+                    epoch,
+                    remaining,
+                    rng,
+                )
+            )
         selected_cases.extend(chosen)
         selected_counts[bucket] = len(chosen)
     rng.shuffle(selected_cases)
     return selected_cases, selected_counts
+
+
+def case_refresh_priority(case_name: str, case_memory: dict[str, dict[str, object]], epoch: int) -> float:
+    item = case_memory.get(case_name)
+    if item is None:
+        return 1e6
+    last_refresh_epoch = int(item.get("last_refresh_epoch", 0))
+    staleness = max(0, epoch - last_refresh_epoch)
+    priority = 1.0 + 0.15 * staleness
+    if bool(item.get("hard_label_used", False)):
+        priority += 1.5
+    priority += 8.0 * float(item.get("fail_pct", 0.0))
+    priority += max(0.0, float(item.get("hard_label_root_gap", 0.03)) - float(item.get("root_gap", 0.03))) * 30.0
+    priority += max(0.0, 0.10 - float(item.get("avg_return", 0.10))) * 8.0
+    return max(1e-3, priority)
+
+
+def weighted_case_sample(
+    case_names: list[str],
+    case_memory: dict[str, dict[str, object]],
+    epoch: int,
+    k: int,
+    rng: random.Random,
+) -> list[str]:
+    pool = list(case_names)
+    chosen: list[str] = []
+    while pool and len(chosen) < k:
+        weights = [case_refresh_priority(case_name, case_memory, epoch) for case_name in pool]
+        total = sum(weights)
+        if total <= 0:
+            pick_index = rng.randrange(len(pool))
+        else:
+            threshold = rng.random() * total
+            running = 0.0
+            pick_index = len(pool) - 1
+            for idx, weight in enumerate(weights):
+                running += weight
+                if running >= threshold:
+                    pick_index = idx
+                    break
+        chosen.append(pool.pop(pick_index))
+    return chosen
 
 
 def decision_top_gap(action_scores: list[tuple[int, float]]) -> float:
@@ -186,6 +246,31 @@ def should_run_hard_label_search(
         if decision_top_gap(scores) < hard_label_root_gap:
             return True
     return False
+
+
+def summarize_case_refresh(
+    case_name: str,
+    episodes: list[dict],
+    decisions: list[dict],
+    hard_label_used: bool,
+    epoch: int,
+    hard_label_root_gap: float,
+) -> dict[str, object]:
+    fail_count = sum(1 for item in episodes if item.get("done_reason") in {"action_timeout", "action_error"})
+    avg_return = sum(float(item.get("final_return", 0.0)) for item in episodes) / max(1, len(episodes))
+    root_gap = 0.0
+    if decisions:
+        root_gap = decision_top_gap(decisions[0]["action_scores"])
+    return {
+        "episodes": list(episodes),
+        "decisions": list(decisions),
+        "hard_label_used": bool(hard_label_used),
+        "fail_pct": float(fail_count) / max(1, len(episodes)),
+        "avg_return": avg_return,
+        "root_gap": root_gap,
+        "last_refresh_epoch": epoch,
+        "hard_label_root_gap": hard_label_root_gap,
+    }
 
 
 def build_tree_datasets(
@@ -1159,6 +1244,7 @@ def main() -> int:
 
     history = []
     archive: dict[str, dict] = {}
+    case_memory: dict[str, dict[str, object]] = {}
     best_eval_cost = float("inf")
     epsilon = args.epsilon
 
@@ -1167,6 +1253,8 @@ def main() -> int:
         epoch_train_cases, sampled_case_counts = sample_cases_for_epoch(
             train_case_buckets,
             args.cases_per_epoch,
+            case_memory,
+            epoch,
             epoch_rng,
         )
         model.eval()
@@ -1430,17 +1518,39 @@ def main() -> int:
             if sampling_ckpt.exists():
                 sampling_ckpt.unlink()
 
+        refreshed_case_names = sorted({str(item["case_name"]) for item in collected_decisions} | {str(item["case_name"]) for item in collected})
+        for case_name in refreshed_case_names:
+            case_episodes = [item for item in collected if str(item["case_name"]) == case_name]
+            case_decisions = [item for item in collected_decisions if str(item["case_name"]) == case_name]
+            hard_label_used = any(str(item.get("source")) == "teacher" for item in case_episodes) or any(
+                str(item.get("source")) == "teacher" for item in case_decisions
+            )
+            case_memory[case_name] = summarize_case_refresh(
+                case_name=case_name,
+                episodes=case_episodes,
+                decisions=case_decisions,
+                hard_label_used=hard_label_used,
+                epoch=epoch,
+                hard_label_root_gap=args.hard_label_root_gap,
+            )
+
         for record in collected:
             best = archive.get(record["case_name"])
             if best is None or float(record["cost"]) < float(best["cost"]):
                 archive[record["case_name"]] = record
         epsilon = max(args.min_epsilon, epsilon * args.epsilon_decay)
 
-        if not collected:
+        if not case_memory:
             raise SystemExit("no training episodes collected")
 
+        replay_episodes = []
+        replay_decisions = []
+        for item in case_memory.values():
+            replay_episodes.extend(item["episodes"])
+            replay_decisions.extend(item["decisions"])
+
         policy_dataset, value_dataset = build_tree_datasets(
-            decisions=collected_decisions,
+            decisions=replay_decisions,
             rng=rng,
             small_threshold=args.small_cost_threshold,
             large_threshold=args.large_cost_threshold,
@@ -1553,7 +1663,7 @@ def main() -> int:
             large_threshold=args.large_cost_threshold,
         )
         decision_source_counts = {"explore": 0, "teacher": 0}
-        for decision in collected_decisions:
+        for decision in replay_decisions:
             decision_source = str(decision.get("source", "explore"))
             decision_source_counts[decision_source] = decision_source_counts.get(decision_source, 0) + 1
         summary = {
@@ -1561,6 +1671,9 @@ def main() -> int:
             "sampled_case_count": len(epoch_train_cases),
             "sampled_case_counts": sampled_case_counts,
             "hard_label_case_count": hard_label_case_count,
+            "memory_case_count": len(case_memory),
+            "memory_episode_count": len(replay_episodes),
+            "memory_decision_count": len(replay_decisions),
             "train_avg_cost": train_avg_cost,
             "train_best_cost": train_best_cost,
             "train_avg_return": train_avg_return,
@@ -1671,7 +1784,8 @@ def main() -> int:
         print(
             "train cases: "
             f"sampled={summary['sampled_case_count']} {summary['sampled_case_counts']} "
-            f"hard_label_cases={summary['hard_label_case_count']}"
+            f"hard_label_cases={summary['hard_label_case_count']} "
+            f"memory_cases={summary['memory_case_count']}"
         )
         train_bucket_line = " | ".join(
             f"{bucket}:n={int(stats['count'])},ret={stats['avg_return']:.3f},fail={stats['fail_pct']:.1f}%"
@@ -1682,7 +1796,9 @@ def main() -> int:
             "train datasets: "
             f"policy={summary['policy_examples']} {summary['policy_bucket_counts']} "
             f"value={summary['value_examples']} {summary['value_bucket_counts']} "
-            f"sources={summary['decision_source_counts']}"
+            f"sources={summary['decision_source_counts']} "
+            f"memory_episodes={summary['memory_episode_count']} "
+            f"memory_decisions={summary['memory_decision_count']}"
         )
         if "eval_bucket_stats" in summary:
             eval_bucket_line = " | ".join(
