@@ -160,7 +160,13 @@ def main() -> int:
     num_workers = args.num_workers if args.num_workers > 0 else min(8, os.cpu_count() or 1)
     mp_start_method = args.mp_start_method
     if mp_start_method == "auto":
-        mp_start_method = "spawn" if device.type == "cuda" else "fork"
+        available = set(mp.get_all_start_methods())
+        if "forkserver" in available:
+            mp_start_method = "forkserver"
+        elif "fork" in available:
+            mp_start_method = "fork"
+        else:
+            mp_start_method = "spawn"
 
     print(f"eval device: {device}")
     print(f"eval workers: {num_workers}")
@@ -182,7 +188,7 @@ def main() -> int:
     if num_workers > 1 and len(case_names) > 1:
         ctx = mp.get_context(mp_start_method)
         with ProcessPoolExecutor(
-            max_workers=num_workers,
+            max_workers=min(num_workers, len(case_names)),
             mp_context=ctx,
             initializer=_init_eval_worker,
             initargs=(

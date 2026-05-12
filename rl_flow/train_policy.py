@@ -45,7 +45,7 @@ _SAMPLER_LABEL_BRANCH_TOPK = 4
 _SAMPLER_LABEL_GUMBEL_SCALE = 0.0
 _SAMPLER_LABEL_RANDOM_MIX_PROB = 0.0
 _SAMPLER_LABEL_EXPAND_WORKERS = 1
-_SAMPLER_SHARED_LABEL_SEARCH = True
+_SAMPLER_SHARED_LABEL_SEARCH = False
 _SAMPLER_SHARED_LABEL_USE_TEACHER_BUDGET = False
 _SAMPLER_SMALL_THRESHOLD = 200.0
 _SAMPLER_LARGE_THRESHOLD = 1000.0
@@ -99,7 +99,7 @@ def build_tree_datasets(
     policy_min_gap: float,
 ) -> tuple[
     tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, dict[str, int]] | None,
-    tuple[torch.Tensor, torch.Tensor, torch.Tensor, dict[str, int]] | None,
+    tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, dict[str, int]] | None,
 ]:
     policy_states: dict[tuple[str, bytes], dict[str, object]] = {}
     value_states: dict[tuple[str, bytes], dict[str, object]] = {}
@@ -223,23 +223,26 @@ def build_tree_datasets(
         bucket_ids = torch.tensor([bucket_id_rows[i] for i in selected], dtype=torch.int64)
         return obs, target_tensor, weights, bucket_ids, _selected_bucket_counts(bucket_rows, selected)
 
-    def build_value() -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, dict[str, int]] | None:
+    def build_value() -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, dict[str, int]] | None:
         obs_rows: list[np.ndarray] = []
         target_rows: list[float] = []
         weight_rows: list[float] = []
         bucket_rows: list[str] = []
+        bucket_id_rows: list[int] = []
         for item in value_states.values():
             obs_rows.append(np.array(item["obs"], copy=True))
             target_rows.append(float(item["target"]))
             weight_rows.append(float(item["weight"]))
             bucket_rows.append(str(item["bucket"]))
+            bucket_id_rows.append(int(item["bucket_id"]))
         if not obs_rows:
             return None
         selected = rebalance_indices(bucket_rows, rng, balance_mode)
         obs = torch.tensor(np.stack([obs_rows[i] for i in selected], axis=0), dtype=torch.float32)
         targets = torch.tensor([target_rows[i] for i in selected], dtype=torch.float32)
         weights = torch.tensor([weight_rows[i] for i in selected], dtype=torch.float32)
-        return obs, targets, weights, _selected_bucket_counts(bucket_rows, selected)
+        bucket_ids = torch.tensor([bucket_id_rows[i] for i in selected], dtype=torch.int64)
+        return obs, targets, weights, bucket_ids, _selected_bucket_counts(bucket_rows, selected)
 
     return build_policy(), build_value()
 
@@ -507,6 +510,22 @@ def _sample_case_worker(case_name: str, episodes_per_case: int, seed: int) -> di
             small_threshold=_SAMPLER_SMALL_THRESHOLD,
             large_threshold=_SAMPLER_LARGE_THRESHOLD,
         )
+        if shared_candidates:
+            best_label = min(shared_candidates, key=lambda item: float(item.final_cost))
+            records.append(
+                {
+                    "case_name": case_name,
+                    "source": "teacher",
+                    "steps": best_label.steps,
+                    "cost": best_label.final_cost,
+                    "area": best_label.final_area,
+                    "depth": best_label.final_depth,
+                    "sequence": best_label.final_sequence,
+                    "final_return": best_label.final_return,
+                    "initial_cost": label_init_cost,
+                    "done_reason": best_label.done_reason,
+                }
+            )
         for decision in shared_decisions:
             decision_records.append(
                 {
@@ -645,7 +664,7 @@ def collect_episodes_parallel(
     collected: list[dict] = []
     decisions: list[dict] = []
     with ProcessPoolExecutor(
-        max_workers=num_workers,
+        max_workers=min(num_workers, len(case_names)),
         mp_context=ctx,
         initializer=_init_sample_worker,
         initargs=(
@@ -733,7 +752,7 @@ def evaluate_split(
             raise ValueError("checkpoint_path is required for parallel evaluation")
         ctx = mp.get_context(mp_start_method)
         with ProcessPoolExecutor(
-            max_workers=num_workers,
+            max_workers=min(num_workers, len(case_names)),
             mp_context=ctx,
             initializer=_init_eval_worker,
             initargs=(
@@ -955,6 +974,7 @@ def main() -> int:
     parser.add_argument("--label-gumbel-scale", type=float, default=0.0)
     parser.add_argument("--label-random-mix-prob", type=float, default=0.0)
     parser.add_argument("--separate-label-search", action="store_true")
+    parser.add_argument("--shared-label-search", action="store_true")
     parser.add_argument("--shared-label-use-teacher-budget", action="store_true")
     parser.add_argument("--search-gumbel-scale", type=float, default=0.4)
     parser.add_argument("--search-random-mix-prob", type=float, default=0.1)
@@ -997,8 +1017,16 @@ def main() -> int:
     eval_workers = args.eval_workers if args.eval_workers > 0 else num_workers
     mp_start_method = args.mp_start_method
     if mp_start_method == "auto":
-        mp_start_method = "spawn" if device.type == "cuda" else "fork"
-    shared_label_search = not args.separate_label_search
+        available = set(mp.get_all_start_methods())
+        if "forkserver" in available:
+            mp_start_method = "forkserver"
+        elif "fork" in available:
+            mp_start_method = "fork"
+        else:
+            mp_start_method = "spawn"
+    if args.shared_label_search and args.separate_label_search:
+        raise SystemExit("choose only one of --shared-label-search / --separate-label-search")
+    shared_label_search = bool(args.shared_label_search and not args.separate_label_search)
     shared_label_use_teacher_budget = args.shared_label_use_teacher_budget
 
     print(f"train device: {device}")
@@ -1248,11 +1276,13 @@ def main() -> int:
         value_obs = None
         value_targets = None
         value_weights = None
+        value_bucket_ids = None
         if value_dataset is not None:
-            value_obs, value_targets, value_weights, value_bucket_counts = value_dataset
+            value_obs, value_targets, value_weights, value_bucket_ids, value_bucket_counts = value_dataset
             value_obs = value_obs.to(device)
             value_targets = value_targets.to(device)
             value_weights = value_weights.to(device)
+            value_bucket_ids = value_bucket_ids.to(device)
 
         for _ in progress_iter(range(args.update_epochs), desc=f"update epoch {epoch}", unit="pass", leave=False):
             if policy_obs is not None and policy_coef > 0:
@@ -1282,7 +1312,8 @@ def main() -> int:
                     batch_obs = value_obs.index_select(0, batch_idx)
                     batch_targets = value_targets.index_select(0, batch_idx)
                     batch_weights = value_weights.index_select(0, batch_idx)
-                    _logits, values = model(batch_obs)
+                    batch_bucket_ids = value_bucket_ids.index_select(0, batch_idx)
+                    _logits, values = model(batch_obs, batch_bucket_ids)
                     value_loss = nn.functional.smooth_l1_loss(values, batch_targets, reduction="none")
                     value_loss = (value_loss * batch_weights).sum() / batch_weights.sum().clamp_min(1e-6)
                     loss = args.value_coef * value_loss

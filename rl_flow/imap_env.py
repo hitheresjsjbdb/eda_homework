@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import re
+import math
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -10,16 +10,53 @@ import numpy as np
 from .actions import MacroAction
 
 
-AIG_RE = re.compile(r"Stats of AIG: pis=(\d+), pos=(\d+), area=(\d+), depth=(\d+)")
-FPGA_RE = re.compile(r"Stats of FPGA: pis=(\d+), pos=(\d+), area=(\d+), depth=(\d+)")
-
-
 @dataclass
 class NetStats:
     pis: int
     pos: int
     area: int
     depth: int
+    inv: int = 0
+    po_inv: int = 0
+    fanout_sum: int = 0
+    fanout_max: int = 0
+    fanout_ge4: int = 0
+    level_sum: int = 0
+    level_ge_half: int = 0
+    lut1: int = 0
+    lut2: int = 0
+    lut3: int = 0
+    lut4: int = 0
+    lut5: int = 0
+    lut6: int = 0
+
+    @property
+    def fanout_avg(self) -> float:
+        return float(self.fanout_sum) / max(1.0, float(self.area))
+
+    @property
+    def level_avg(self) -> float:
+        return float(self.level_sum) / max(1.0, float(self.area))
+
+    @property
+    def high_fanout_ratio(self) -> float:
+        return float(self.fanout_ge4) / max(1.0, float(self.area))
+
+    @property
+    def high_level_ratio(self) -> float:
+        return float(self.level_ge_half) / max(1.0, float(self.area))
+
+    @property
+    def inv_ratio(self) -> float:
+        return float(self.inv) / max(1.0, float(self.area) * 2.0)
+
+    @property
+    def po_inv_ratio(self) -> float:
+        return float(self.po_inv) / max(1.0, float(self.pos))
+
+    @property
+    def lut_hist(self) -> tuple[int, int, int, int, int, int]:
+        return (self.lut1, self.lut2, self.lut3, self.lut4, self.lut5, self.lut6)
 
 
 @dataclass
@@ -43,7 +80,7 @@ class SearchState:
 
 
 class ImapEnv:
-    _EVAL_CACHE: dict[tuple[str, tuple[str, ...], str], EvalSnapshot] = {}
+    _EVAL_CACHE: dict[tuple[str, tuple[str, ...], str, bool], EvalSnapshot] = {}
     _CACHE_MAX_ENTRIES = 200000
 
     def __init__(
@@ -54,6 +91,8 @@ class ImapEnv:
         max_steps: int = 4,
         probe_map_command: str = "map_fpga -P 12 -C 6 -G 1 -L 2",
         timeout_sec: float | None = 60.0,
+        use_history: bool = True,
+        history_capacity: int = 5,
     ) -> None:
         self.input_aig = Path(input_aig).resolve()
         self.imap_bin = Path(imap_bin).resolve()
@@ -61,6 +100,8 @@ class ImapEnv:
         self.max_steps = max_steps
         self.probe_map_command = probe_map_command
         self.timeout_sec = timeout_sec
+        self.use_history = use_history
+        self.history_capacity = history_capacity
         self.initial_snapshot: EvalSnapshot | None = None
         self.current_state: SearchState | None = None
 
@@ -147,10 +188,7 @@ class ImapEnv:
     def current_seq(self, final_map_command: str | None = None) -> str:
         if self.current_state is None:
             raise RuntimeError("Call reset() before current_seq().")
-        commands = list(self.current_state.sequence)
-        if final_map_command is not None:
-            commands.append(final_map_command)
-        return "; ".join(commands) + ";"
+        return self._sequence_str(self.current_state.sequence, final_map_command)
 
     def _next_action_counts(self, state: SearchState, action_index: int) -> np.ndarray:
         counts = state.action_counts.copy()
@@ -178,7 +216,7 @@ class ImapEnv:
         fallback_sequence = list(state.sequence)
         attempted_sequence = fallback_sequence + list(action.commands)
         reward = -1.0
-        sequence_str = "; ".join(fallback_sequence + [fallback_map]) + ";"
+        sequence_str = self._sequence_str(tuple(fallback_sequence), fallback_map)
         return {
             "next_sequence": tuple(state.sequence),
             "next_snapshot": prev_snapshot,
@@ -186,7 +224,7 @@ class ImapEnv:
             "done": True,
             "done_reason": reason,
             "sequence_str": sequence_str,
-            "attempted_sequence_str": "; ".join(attempted_sequence) + ";" if attempted_sequence else "",
+            "attempted_sequence_str": self._sequence_str(tuple(attempted_sequence), None) if attempted_sequence else "",
         }
 
     def _simulate_action_from_state(self, state: SearchState, action_index: int) -> dict:
@@ -195,24 +233,37 @@ class ImapEnv:
         next_sequence = list(state.sequence)
 
         try:
-            if action.terminal or state.step_index + 1 >= self.max_steps:
+            if action.terminal:
                 final_map = action.final_map_command or self.probe_map_command
                 final_snapshot = self._evaluate(tuple(next_sequence), final_map)
                 reward = self._normalized_reward(prev_snapshot.cost - final_snapshot.cost, terminal=True)
-                sequence_str = "; ".join(next_sequence + [final_map]) + ";"
+                sequence_str = self._sequence_str(tuple(next_sequence), final_map)
                 return {
                     "next_sequence": tuple(next_sequence),
                     "next_snapshot": final_snapshot,
                     "reward": reward,
                     "done": True,
-                    "done_reason": "terminal_action" if action.terminal else "max_steps",
+                    "done_reason": "terminal_action",
                     "sequence_str": sequence_str,
                 }
 
             next_sequence.extend(action.commands)
+            if state.step_index + 1 >= self.max_steps:
+                final_snapshot = self._evaluate(tuple(next_sequence), self.probe_map_command)
+                reward = self._normalized_reward(prev_snapshot.cost - final_snapshot.cost, terminal=True)
+                sequence_str = self._sequence_str(tuple(next_sequence), self.probe_map_command)
+                return {
+                    "next_sequence": tuple(next_sequence),
+                    "next_snapshot": final_snapshot,
+                    "reward": reward,
+                    "done": True,
+                    "done_reason": "max_steps",
+                    "sequence_str": sequence_str,
+                }
+
             next_snapshot = self._evaluate(tuple(next_sequence), self.probe_map_command)
             reward = self._normalized_reward(prev_snapshot.cost - next_snapshot.cost, terminal=False)
-            sequence_str = "; ".join(next_sequence) + ";"
+            sequence_str = self._sequence_str(tuple(next_sequence), None)
             return {
                 "next_sequence": tuple(next_sequence),
                 "next_snapshot": next_snapshot,
@@ -240,13 +291,14 @@ class ImapEnv:
         if not self.imap_bin.is_file():
             raise FileNotFoundError(self.imap_bin)
 
-        cache_key = (str(self.input_aig), sequence, map_command)
+        needs_history = self._map_uses_history(map_command)
+        cache_key = (str(self.input_aig), sequence, map_command, needs_history)
         cached = self._EVAL_CACHE.get(cache_key)
         if cached is not None:
             return cached
 
         commands = [f"read_aiger -f {self.input_aig}"]
-        commands.extend(sequence)
+        commands.extend(self._expanded_sequence(sequence, use_history=needs_history))
         commands.append("print_stats -t 0")
         commands.append(map_command)
         commands.append("print_stats -t 1")
@@ -261,18 +313,87 @@ class ImapEnv:
         if proc.returncode != 0:
             raise RuntimeError(proc.stderr or proc.stdout)
 
-        aig_match = AIG_RE.search(proc.stdout)
-        fpga_match = FPGA_RE.search(proc.stdout)
-        if aig_match is None or fpga_match is None:
+        aig_stats = self._parse_stats_line(proc.stdout, "Stats of AIG:")
+        fpga_stats = self._parse_stats_line(proc.stdout, "Stats of FPGA:")
+        if aig_stats is None or fpga_stats is None:
             raise RuntimeError(f"Failed to parse stats from iMAP output:\n{proc.stdout}")
-
-        aig_stats = NetStats(*(int(x) for x in aig_match.groups()))
-        fpga_stats = NetStats(*(int(x) for x in fpga_match.groups()))
         snapshot = EvalSnapshot(aig=aig_stats, fpga=fpga_stats, sequence=sequence)
         if len(self._EVAL_CACHE) >= self._CACHE_MAX_ENTRIES:
             self._EVAL_CACHE.clear()
         self._EVAL_CACHE[cache_key] = snapshot
         return snapshot
+
+    def _map_uses_history(self, map_command: str | None) -> bool:
+        return bool(self.use_history and map_command is not None and "-t 1" in map_command)
+
+    def _expanded_sequence(
+        self,
+        sequence: tuple[str, ...],
+        final_map_command: str | None = None,
+        use_history: bool | None = None,
+    ) -> list[str]:
+        commands: list[str] = []
+        if use_history is None:
+            use_history = self._map_uses_history(final_map_command)
+        if not use_history:
+            commands.extend(sequence)
+            if final_map_command is not None:
+                commands.append(final_map_command)
+            return commands
+
+        commands.extend(["history -c", "history -a"])
+        history_size = 1
+        for command in sequence:
+            commands.append(command)
+            if history_size < self.history_capacity:
+                commands.append("history -a")
+                history_size += 1
+        if final_map_command is not None:
+            commands.append(final_map_command)
+        return commands
+
+    def _sequence_str(self, sequence: tuple[str, ...], final_map_command: str | None) -> str:
+        commands = self._expanded_sequence(sequence, final_map_command)
+        return "; ".join(commands) + ";"
+
+    def _parse_stats_line(self, stdout: str, prefix: str) -> NetStats | None:
+        for line in stdout.splitlines():
+            stripped = line.strip()
+            if not stripped.startswith(prefix):
+                continue
+            payload = stripped[len(prefix) :].strip()
+            fields: dict[str, int] = {}
+            for part in payload.split(","):
+                item = part.strip()
+                if "=" not in item:
+                    continue
+                key, value = item.split("=", 1)
+                try:
+                    fields[key.strip()] = int(value.strip())
+                except ValueError:
+                    continue
+            if {"pis", "pos", "area", "depth"} - fields.keys():
+                return None
+            return NetStats(
+                pis=fields["pis"],
+                pos=fields["pos"],
+                area=fields["area"],
+                depth=fields["depth"],
+                inv=fields.get("inv", 0),
+                po_inv=fields.get("po_inv", 0),
+                fanout_sum=fields.get("fanout_sum", 0),
+                fanout_max=fields.get("fanout_max", 0),
+                fanout_ge4=fields.get("fanout_ge4", 0),
+                level_sum=fields.get("level_sum", 0),
+                level_ge_half=fields.get("level_ge_half", 0),
+                lut1=fields.get("lut1", 0),
+                lut2=fields.get("lut2", 0),
+                lut3=fields.get("lut3", 0),
+                lut4=fields.get("lut4", 0),
+                lut5=fields.get("lut5", 0),
+                lut6=fields.get("lut6", 0),
+            )
+        return None
 
     def _encode_state(
         self,
@@ -283,32 +404,80 @@ class ImapEnv:
 
         snapshot = state.snapshot
         init = self.initial_snapshot
+        step_denom = max(1.0, float(self.max_steps))
+        action_count_scale = max(1.0, float(state.step_index))
+        last_action_one_hot = np.zeros(len(self.actions) + 1, dtype=np.float32)
+        last_action_slot = state.last_action_index if state.last_action_index >= 0 else len(self.actions)
+        last_action_one_hot[last_action_slot] = 1.0
 
-        base = np.array(
+        def ratio(curr: float, base: float) -> float:
+            return float(curr) / max(1.0, float(base))
+
+        def delta(curr: float, base: float) -> float:
+            return (float(curr) - float(base)) / max(1.0, float(base))
+
+        def stats_features(stats: NetStats) -> list[float]:
+            lut_hist = stats.lut_hist
+            return [
+                math.log1p(float(stats.pis)),
+                math.log1p(float(stats.pos)),
+                math.log1p(float(stats.area)),
+                math.log1p(float(stats.depth)),
+                math.log1p(float(stats.fanout_max)),
+                stats.fanout_avg,
+                stats.high_fanout_ratio,
+                stats.level_avg,
+                stats.high_level_ratio,
+                stats.inv_ratio,
+                stats.po_inv_ratio,
+                *(float(count) / max(1.0, float(stats.area)) for count in lut_hist),
+            ]
+
+        current_features = np.array(
             [
-                float(snapshot.aig.pis),
-                float(snapshot.aig.pos),
-                float(snapshot.aig.area),
-                float(snapshot.aig.depth),
-                float(snapshot.fpga.area),
-                float(snapshot.fpga.depth),
-                float(snapshot.cost),
-                float(init.aig.area),
-                float(init.aig.depth),
-                float(init.fpga.area),
-                float(init.fpga.depth),
-                float(init.cost),
-                float(snapshot.aig.area) / max(1.0, float(init.aig.area)),
-                float(snapshot.aig.depth) / max(1.0, float(init.aig.depth)),
-                float(snapshot.fpga.area) / max(1.0, float(init.fpga.area)),
-                float(snapshot.fpga.depth) / max(1.0, float(init.fpga.depth)),
-                float(init.cost - snapshot.cost),
-                float(snapshot.fpga.area - init.fpga.area),
-                float(snapshot.fpga.depth - init.fpga.depth),
-                float(state.step_index),
-                float(self.max_steps - state.step_index),
-                float(state.last_action_index),
+                math.log1p(float(snapshot.cost)),
+                *stats_features(snapshot.aig),
+                *stats_features(snapshot.fpga),
             ],
             dtype=np.float32,
         )
-        return np.concatenate([base, state.action_counts.astype(np.float32)], axis=0)
+        init_features = np.array(
+            [
+                math.log1p(float(init.cost)),
+                *stats_features(init.aig),
+                *stats_features(init.fpga),
+            ],
+            dtype=np.float32,
+        )
+        relational = np.array(
+            [
+                ratio(snapshot.aig.area, init.aig.area),
+                ratio(snapshot.aig.depth, init.aig.depth),
+                ratio(snapshot.fpga.area, init.fpga.area),
+                ratio(snapshot.fpga.depth, init.fpga.depth),
+                ratio(snapshot.cost, init.cost),
+                delta(snapshot.aig.area, init.aig.area),
+                delta(snapshot.aig.depth, init.aig.depth),
+                delta(snapshot.fpga.area, init.fpga.area),
+                delta(snapshot.fpga.depth, init.fpga.depth),
+                delta(snapshot.cost, init.cost),
+                snapshot.aig.inv_ratio - init.aig.inv_ratio,
+                snapshot.aig.high_fanout_ratio - init.aig.high_fanout_ratio,
+                snapshot.aig.high_level_ratio - init.aig.high_level_ratio,
+                snapshot.fpga.high_fanout_ratio - init.fpga.high_fanout_ratio,
+                snapshot.fpga.high_level_ratio - init.fpga.high_level_ratio,
+                snapshot.fpga.level_avg - init.fpga.level_avg,
+                snapshot.fpga.fanout_avg - init.fpga.fanout_avg,
+                float(init.cost - snapshot.cost) / max(1.0, float(init.cost)),
+                float(init.fpga.area - snapshot.fpga.area) / max(1.0, float(init.fpga.area)),
+                float(init.fpga.depth - snapshot.fpga.depth) / max(1.0, float(init.fpga.depth)),
+                float(state.step_index) / step_denom,
+                float(self.max_steps - state.step_index) / step_denom,
+            ],
+            dtype=np.float32,
+        )
+        normalized_action_counts = state.action_counts.astype(np.float32) / action_count_scale
+        return np.concatenate(
+            [current_features, init_features, relational, normalized_action_counts, last_action_one_hot],
+            axis=0,
+        )

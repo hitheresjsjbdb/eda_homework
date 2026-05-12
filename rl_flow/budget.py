@@ -40,8 +40,16 @@ def adapt_search_budget(
     base_beam_width: int,
     base_branch_topk: int,
 ) -> tuple[int, int, int]:
-    if init_cost >= 1000:
-        return min(base_max_steps + 2, 6), max(2, base_beam_width - 2), max(2, base_branch_topk - 1)
-    if init_cost >= 500:
-        return min(base_max_steps + 1, 6), max(2, base_beam_width - 1), max(2, base_branch_topk - 1)
+    if init_cost < 50:
+        return min(base_max_steps, 4), max(2, base_beam_width - 2), max(2, base_branch_topk - 2)
+    if init_cost < 200:
+        return base_max_steps, max(2, base_beam_width - 1), max(2, base_branch_topk - 1)
+    if init_cost < 1000:
+        return min(base_max_steps + 1, 6), base_beam_width, base_branch_topk
+    if init_cost < 3000:
+        return min(base_max_steps + 1, 6), base_beam_width + 1, base_branch_topk + 1
+    if init_cost < 6000:
+        return min(base_max_steps + 2, 7), base_beam_width + 1, base_branch_topk + 1
+    if init_cost >= 6000:
+        return min(base_max_steps + 2, 7), base_beam_width + 2, base_branch_topk + 1
     return base_max_steps, base_beam_width, base_branch_topk

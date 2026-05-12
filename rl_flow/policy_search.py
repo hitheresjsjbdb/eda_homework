@@ -489,6 +489,12 @@ def beam_search(
                 predicted = next_value
                 rank_return = _normalized_return(env, next_state.snapshot.cost)
 
+            step = TrajectoryStep(
+                obs=item.node_obs,
+                action=int(item.action_idx),
+                log_prob=float(torch.log(item.probs[item.action_idx].clamp_min(1e-12)).item()),
+                entropy=0.0,
+            )
             new_log_prob = item.node.log_prob_sum + math.log(max(prob, 1e-12))
             score = rank_return + value_weight * predicted + prior_weight * new_log_prob
             child = BeamNode(
@@ -498,7 +504,7 @@ def beam_search(
                 final_info=info,
                 score=score,
                 log_prob_sum=new_log_prob,
-                steps=item.node.steps,
+                steps=item.node.steps + [step],
             )
             expanded.append(child)
             if done and (
