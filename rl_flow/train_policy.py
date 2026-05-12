@@ -47,6 +47,8 @@ _SAMPLER_LABEL_RANDOM_MIX_PROB = 0.0
 _SAMPLER_LABEL_EXPAND_WORKERS = 1
 _SAMPLER_SHARED_LABEL_SEARCH = True
 _SAMPLER_SHARED_LABEL_USE_TEACHER_BUDGET = False
+_SAMPLER_ENABLE_HARD_LABEL_SEARCH = True
+_SAMPLER_HARD_LABEL_ROOT_GAP = 0.03
 _SAMPLER_SMALL_THRESHOLD = 200.0
 _SAMPLER_LARGE_THRESHOLD = 1000.0
 _EVAL_MODEL: PolicyValueNet | None = None
@@ -85,6 +87,105 @@ def _selected_bucket_counts(bucket_rows: list[str], selected: list[int]) -> dict
     for idx in selected:
         counts[bucket_rows[idx]] += 1
     return counts
+
+
+def estimate_case_cost_proxy(case_root: Path, case_name: str) -> float:
+    ref = read_ref_qor(case_root / case_name)
+    if ref is None:
+        return 0.0
+    return 0.6 * float(ref["level"]) + 0.4 * float(ref["area"])
+
+
+def build_case_buckets(
+    case_names: list[str],
+    case_root: Path,
+    small_threshold: float,
+    large_threshold: float,
+) -> dict[str, list[str]]:
+    buckets = {"small": [], "medium": [], "large": []}
+    for case_name in case_names:
+        proxy_cost = estimate_case_cost_proxy(case_root, case_name)
+        bucket = case_bucket(
+            proxy_cost,
+            small_threshold=small_threshold,
+            large_threshold=large_threshold,
+        )
+        buckets[bucket].append(case_name)
+    return buckets
+
+
+def sample_cases_for_epoch(
+    case_buckets: dict[str, list[str]],
+    cases_per_epoch: int,
+    rng: random.Random,
+) -> tuple[list[str], dict[str, int]]:
+    all_cases = [case_name for bucket in ("small", "medium", "large") for case_name in case_buckets.get(bucket, [])]
+    if cases_per_epoch <= 0 or cases_per_epoch >= len(all_cases):
+        return list(all_cases), {bucket: len(case_buckets.get(bucket, [])) for bucket in ("small", "medium", "large")}
+
+    active_buckets = [bucket for bucket in ("large", "medium", "small") if case_buckets.get(bucket)]
+    if not active_buckets:
+        return [], {"small": 0, "medium": 0, "large": 0}
+
+    target_counts = {bucket: 0 for bucket in ("small", "medium", "large")}
+    base = max(1, cases_per_epoch // len(active_buckets))
+    for bucket in active_buckets:
+        target_counts[bucket] = min(len(case_buckets[bucket]), base)
+
+    assigned = sum(target_counts.values())
+    remaining = max(0, cases_per_epoch - assigned)
+    while remaining > 0:
+        progressed = False
+        for bucket in ("large", "medium", "small"):
+            capacity = len(case_buckets.get(bucket, [])) - target_counts[bucket]
+            if capacity <= 0:
+                continue
+            target_counts[bucket] += 1
+            remaining -= 1
+            progressed = True
+            if remaining <= 0:
+                break
+        if not progressed:
+            break
+
+    selected_cases: list[str] = []
+    selected_counts = {"small": 0, "medium": 0, "large": 0}
+    for bucket in ("small", "medium", "large"):
+        cases = list(case_buckets.get(bucket, []))
+        if not cases or target_counts[bucket] <= 0:
+            continue
+        chosen = rng.sample(cases, target_counts[bucket])
+        selected_cases.extend(chosen)
+        selected_counts[bucket] = len(chosen)
+    rng.shuffle(selected_cases)
+    return selected_cases, selected_counts
+
+
+def decision_top_gap(action_scores: list[tuple[int, float]]) -> float:
+    if len(action_scores) < 2:
+        return 0.0
+    ordered = sorted((float(score) for _action, score in action_scores), reverse=True)
+    return float(ordered[0] - ordered[1])
+
+
+def should_run_hard_label_search(
+    init_cost: float,
+    episodes: list[dict],
+    decisions: list[dict] | list[object],
+    small_threshold: float,
+    large_threshold: float,
+    hard_label_root_gap: float,
+) -> bool:
+    if case_bucket(init_cost, small_threshold=small_threshold, large_threshold=large_threshold) == "large":
+        return True
+    if any(item.get("done_reason") in {"action_timeout", "action_error"} for item in episodes):
+        return True
+    if decisions:
+        first = decisions[0]
+        scores = first["action_scores"] if isinstance(first, dict) else first.action_scores
+        if decision_top_gap(scores) < hard_label_root_gap:
+            return True
+    return False
 
 
 def build_tree_datasets(
@@ -330,6 +431,8 @@ def _init_sample_worker(
     label_expand_workers: int,
     shared_label_search: bool,
     shared_label_use_teacher_budget: bool,
+    enable_hard_label_search: bool,
+    hard_label_root_gap: float,
     small_threshold: float,
     large_threshold: float,
 ) -> None:
@@ -353,6 +456,8 @@ def _init_sample_worker(
     global _SAMPLER_LABEL_EXPAND_WORKERS
     global _SAMPLER_SHARED_LABEL_SEARCH
     global _SAMPLER_SHARED_LABEL_USE_TEACHER_BUDGET
+    global _SAMPLER_ENABLE_HARD_LABEL_SEARCH
+    global _SAMPLER_HARD_LABEL_ROOT_GAP
     global _SAMPLER_SMALL_THRESHOLD
     global _SAMPLER_LARGE_THRESHOLD
 
@@ -380,6 +485,8 @@ def _init_sample_worker(
     _SAMPLER_LABEL_EXPAND_WORKERS = label_expand_workers
     _SAMPLER_SHARED_LABEL_SEARCH = shared_label_search
     _SAMPLER_SHARED_LABEL_USE_TEACHER_BUDGET = shared_label_use_teacher_budget
+    _SAMPLER_ENABLE_HARD_LABEL_SEARCH = enable_hard_label_search
+    _SAMPLER_HARD_LABEL_ROOT_GAP = hard_label_root_gap
     _SAMPLER_SMALL_THRESHOLD = small_threshold
     _SAMPLER_LARGE_THRESHOLD = large_threshold
 
@@ -454,32 +561,44 @@ def _sample_case_worker(case_name: str, episodes_per_case: int, seed: int) -> di
                 "done_reason": episode.done_reason,
             }
         )
-    for decision in decisions:
-        decision_records.append(
-            {
-                "case_name": case_name,
-                "source": "explore",
-                "initial_cost": init_cost,
-                "obs": np.array(decision.obs, copy=True),
-                "state_return": float(decision.state_return),
-                "action_scores": [(int(action), float(score)) for action, score in decision.action_scores],
-            }
-        )
+    hard_label_used = False
     if _SAMPLER_SHARED_LABEL_SEARCH:
-        shared_candidates, shared_decisions = candidates, decisions
-        label_init_cost = init_cost
-        for decision in shared_decisions:
+        if _SAMPLER_ENABLE_HARD_LABEL_SEARCH and should_run_hard_label_search(
+            init_cost=init_cost,
+            episodes=records,
+            decisions=decisions,
+            small_threshold=_SAMPLER_SMALL_THRESHOLD,
+            large_threshold=_SAMPLER_LARGE_THRESHOLD,
+            hard_label_root_gap=_SAMPLER_HARD_LABEL_ROOT_GAP,
+        ):
+            hard_label_used = True
+        else:
+            for decision in decisions:
+                decision_records.append(
+                    {
+                        "case_name": case_name,
+                        "source": "teacher",
+                        "initial_cost": init_cost,
+                        "obs": np.array(decision.obs, copy=True),
+                        "state_return": float(decision.state_return),
+                        "action_scores": [(int(action), float(score)) for action, score in decision.action_scores],
+                    }
+                )
+    else:
+        for decision in decisions:
             decision_records.append(
                 {
                     "case_name": case_name,
-                    "source": "teacher",
-                    "initial_cost": label_init_cost,
+                    "source": "explore",
+                    "initial_cost": init_cost,
                     "obs": np.array(decision.obs, copy=True),
                     "state_return": float(decision.state_return),
                     "action_scores": [(int(action), float(score)) for action, score in decision.action_scores],
                 }
             )
-    else:
+        hard_label_used = True
+
+    if hard_label_used:
         env.reset()
         if env.initial_snapshot is None:
             raise RuntimeError("failed to initialize environment")
@@ -507,6 +626,22 @@ def _sample_case_worker(case_name: str, episodes_per_case: int, seed: int) -> di
             small_threshold=_SAMPLER_SMALL_THRESHOLD,
             large_threshold=_SAMPLER_LARGE_THRESHOLD,
         )
+        if shared_candidates:
+            best_label = min(shared_candidates, key=lambda item: float(item.final_cost))
+            records.append(
+                {
+                    "case_name": case_name,
+                    "source": "teacher",
+                    "steps": best_label.steps,
+                    "cost": best_label.final_cost,
+                    "area": best_label.final_area,
+                    "depth": best_label.final_depth,
+                    "sequence": best_label.final_sequence,
+                    "final_return": best_label.final_return,
+                    "initial_cost": label_init_cost,
+                    "done_reason": best_label.done_reason,
+                }
+            )
         for decision in shared_decisions:
             decision_records.append(
                 {
@@ -518,7 +653,7 @@ def _sample_case_worker(case_name: str, episodes_per_case: int, seed: int) -> di
                     "action_scores": [(int(action), float(score)) for action, score in decision.action_scores],
                 }
             )
-    return {"episodes": records, "decisions": decision_records}
+    return {"episodes": records, "decisions": decision_records, "hard_label_used": hard_label_used}
 
 
 def _init_eval_worker(
@@ -637,13 +772,16 @@ def collect_episodes_parallel(
     label_expand_workers: int,
     shared_label_search: bool,
     shared_label_use_teacher_budget: bool,
+    enable_hard_label_search: bool,
+    hard_label_root_gap: float,
     small_threshold: float,
     large_threshold: float,
     mp_start_method: str,
-) -> tuple[list[dict], list[dict]]:
+) -> tuple[list[dict], list[dict], int]:
     ctx = mp.get_context(mp_start_method)
     collected: list[dict] = []
     decisions: list[dict] = []
+    hard_label_count = 0
     with ProcessPoolExecutor(
         max_workers=num_workers,
         mp_context=ctx,
@@ -668,6 +806,8 @@ def collect_episodes_parallel(
             label_expand_workers,
             shared_label_search,
             shared_label_use_teacher_budget,
+            enable_hard_label_search,
+            hard_label_root_gap,
             small_threshold,
             large_threshold,
         ),
@@ -693,9 +833,10 @@ def collect_episodes_parallel(
                 result = future.result()
                 collected.extend(result["episodes"])
                 decisions.extend(result["decisions"])
+                hard_label_count += int(result.get("hard_label_used", False))
             except Exception as exc:
                 print(f"collect worker failed: {exc}")
-    return collected, decisions
+    return collected, decisions, hard_label_count
 
 
 def evaluate_split(
@@ -921,6 +1062,7 @@ def main() -> int:
     parser.add_argument("--history-json", type=Path, default=None)
     parser.add_argument("--epochs", type=int, default=30)
     parser.add_argument("--episodes-per-case", type=int, default=4)
+    parser.add_argument("--cases-per-epoch", type=int, default=0)
     parser.add_argument("--max-steps", type=int, default=4)
     parser.add_argument("--hidden-dim", type=int, default=128)
     parser.add_argument("--batch-size", type=int, default=256)
@@ -956,6 +1098,8 @@ def main() -> int:
     parser.add_argument("--label-random-mix-prob", type=float, default=0.0)
     parser.add_argument("--separate-label-search", action="store_true")
     parser.add_argument("--shared-label-use-teacher-budget", action="store_true")
+    parser.add_argument("--disable-hard-label-search", action="store_true")
+    parser.add_argument("--hard-label-root-gap", type=float, default=0.03)
     parser.add_argument("--search-gumbel-scale", type=float, default=0.4)
     parser.add_argument("--search-random-mix-prob", type=float, default=0.1)
     parser.add_argument("--grad-clip", type=float, default=5.0)
@@ -978,6 +1122,12 @@ def main() -> int:
 
     train_cases = load_split(args.split, args.split_name)
     eval_cases = load_split(args.split, args.eval_split_name) if args.eval_split_name else []
+    train_case_buckets = build_case_buckets(
+        train_cases,
+        args.case_root,
+        args.small_cost_threshold,
+        args.large_cost_threshold,
+    )
     actions = default_macro_actions()
 
     probe_env = ImapEnv(
@@ -1000,6 +1150,7 @@ def main() -> int:
         mp_start_method = "spawn" if device.type == "cuda" else "fork"
     shared_label_search = not args.separate_label_search
     shared_label_use_teacher_budget = args.shared_label_use_teacher_budget
+    enable_hard_label_search = not args.disable_hard_label_search
 
     print(f"train device: {device}")
     print(f"collect workers: {num_workers}")
@@ -1012,6 +1163,12 @@ def main() -> int:
     epsilon = args.epsilon
 
     for epoch in range(1, args.epochs + 1):
+        epoch_rng = random.Random(args.seed + epoch * 2000003)
+        epoch_train_cases, sampled_case_counts = sample_cases_for_epoch(
+            train_case_buckets,
+            args.cases_per_epoch,
+            epoch_rng,
+        )
         model.eval()
         sampling_ckpt = args.output.with_suffix(f".epoch{epoch}.sample.pt")
         save_sampling_checkpoint(
@@ -1023,9 +1180,9 @@ def main() -> int:
             model.num_buckets,
         )
         try:
-            if num_workers > 1 and len(train_cases) > 1:
-                collected, collected_decisions = collect_episodes_parallel(
-                    case_names=train_cases,
+            if num_workers > 1 and len(epoch_train_cases) > 1:
+                collected, collected_decisions, hard_label_case_count = collect_episodes_parallel(
+                    case_names=epoch_train_cases,
                     checkpoint_path=sampling_ckpt,
                     case_root=args.case_root,
                     imap_bin=args.imap_bin,
@@ -1048,6 +1205,8 @@ def main() -> int:
                     label_expand_workers=args.label_search_workers,
                     shared_label_search=shared_label_search,
                     shared_label_use_teacher_budget=shared_label_use_teacher_budget,
+                    enable_hard_label_search=enable_hard_label_search,
+                    hard_label_root_gap=args.hard_label_root_gap,
                     small_threshold=args.small_cost_threshold,
                     large_threshold=args.large_cost_threshold,
                     mp_start_method=mp_start_method,
@@ -1055,8 +1214,9 @@ def main() -> int:
             else:
                 collected = []
                 collected_decisions = []
+                hard_label_case_count = 0
                 for case_index, case_name in enumerate(
-                    progress_iter(train_cases, desc=f"collect epoch {epoch}", unit="case")
+                    progress_iter(epoch_train_cases, desc=f"collect epoch {epoch}", unit="case")
                 ):
                     aig_path = args.case_root / case_name / f"{case_name}.aig"
                     env = ImapEnv(
@@ -1121,30 +1281,96 @@ def main() -> int:
                                 "done_reason": episode.done_reason,
                             }
                         )
-                    for decision in decisions:
-                        collected_decisions.append(
-                            {
-                                "case_name": case_name,
-                                "source": "explore",
-                                "initial_cost": init_cost,
-                                "obs": np.array(decision.obs, copy=True),
-                                "state_return": float(decision.state_return),
-                                "action_scores": [(int(action), float(score)) for action, score in decision.action_scores],
-                            }
-                        )
                     if shared_label_search:
+                        if enable_hard_label_search and should_run_hard_label_search(
+                            init_cost=init_cost,
+                            episodes=collected[-len(candidates):],
+                            decisions=decisions,
+                            small_threshold=args.small_cost_threshold,
+                            large_threshold=args.large_cost_threshold,
+                            hard_label_root_gap=args.hard_label_root_gap,
+                        ):
+                            hard_label_case_count += 1
+                            env.reset()
+                            if env.initial_snapshot is None:
+                                raise RuntimeError("failed to initialize environment")
+                            label_init_cost = float(env.initial_snapshot.cost)
+                            label_max_steps, label_beam_width, label_branch_topk = adapt_search_budget(
+                                label_init_cost,
+                                args.max_steps,
+                                args.label_beam_width,
+                                args.label_branch_topk,
+                            )
+                            env.max_steps = label_max_steps
+                            label_rng = random.Random(args.seed + epoch * 1000003 + case_index * 100003 + 9173)
+                            label_candidates, label_decisions = search_candidates(
+                                env=env,
+                                model=model,
+                                device=device,
+                                rng=label_rng,
+                                num_candidates=1,
+                                beam_width=label_beam_width,
+                                branch_topk=label_branch_topk,
+                                temperature=args.label_temperature,
+                                gumbel_scale=args.label_gumbel_scale,
+                                random_mix_prob=args.label_random_mix_prob,
+                                expand_workers=args.label_search_workers,
+                                reset_env=False,
+                                small_threshold=args.small_cost_threshold,
+                                large_threshold=args.large_cost_threshold,
+                            )
+                            if label_candidates:
+                                best_label = min(label_candidates, key=lambda item: float(item.final_cost))
+                                collected.append(
+                                    {
+                                        "case_name": case_name,
+                                        "source": "teacher",
+                                        "steps": best_label.steps,
+                                        "cost": best_label.final_cost,
+                                        "area": best_label.final_area,
+                                        "depth": best_label.final_depth,
+                                        "sequence": best_label.final_sequence,
+                                        "final_return": best_label.final_return,
+                                        "initial_cost": label_init_cost,
+                                        "done_reason": best_label.done_reason,
+                                    }
+                                )
+                            for decision in label_decisions:
+                                collected_decisions.append(
+                                    {
+                                        "case_name": case_name,
+                                        "source": "teacher",
+                                        "initial_cost": label_init_cost,
+                                        "obs": np.array(decision.obs, copy=True),
+                                        "state_return": float(decision.state_return),
+                                        "action_scores": [(int(action), float(score)) for action, score in decision.action_scores],
+                                    }
+                                )
+                        else:
+                            for decision in decisions:
+                                collected_decisions.append(
+                                    {
+                                        "case_name": case_name,
+                                        "source": "teacher",
+                                        "initial_cost": init_cost,
+                                        "obs": np.array(decision.obs, copy=True),
+                                        "state_return": float(decision.state_return),
+                                        "action_scores": [(int(action), float(score)) for action, score in decision.action_scores],
+                                    }
+                                )
+                    else:
+                        hard_label_case_count += 1
                         for decision in decisions:
                             collected_decisions.append(
                                 {
                                     "case_name": case_name,
-                                    "source": "teacher",
+                                    "source": "explore",
                                     "initial_cost": init_cost,
                                     "obs": np.array(decision.obs, copy=True),
                                     "state_return": float(decision.state_return),
                                     "action_scores": [(int(action), float(score)) for action, score in decision.action_scores],
                                 }
                             )
-                    else:
                         env.reset()
                         if env.initial_snapshot is None:
                             raise RuntimeError("failed to initialize environment")
@@ -1332,6 +1558,9 @@ def main() -> int:
             decision_source_counts[decision_source] = decision_source_counts.get(decision_source, 0) + 1
         summary = {
             "epoch": epoch,
+            "sampled_case_count": len(epoch_train_cases),
+            "sampled_case_counts": sampled_case_counts,
+            "hard_label_case_count": hard_label_case_count,
             "train_avg_cost": train_avg_cost,
             "train_best_cost": train_best_cost,
             "train_avg_return": train_avg_return,
@@ -1439,6 +1668,11 @@ def main() -> int:
                 f" eval_exact_ref_matches={summary['eval_exact_ref_matches']}"
             )
         print(status)
+        print(
+            "train cases: "
+            f"sampled={summary['sampled_case_count']} {summary['sampled_case_counts']} "
+            f"hard_label_cases={summary['hard_label_case_count']}"
+        )
         train_bucket_line = " | ".join(
             f"{bucket}:n={int(stats['count'])},ret={stats['avg_return']:.3f},fail={stats['fail_pct']:.1f}%"
             for bucket, stats in summary["train_bucket_stats"].items()
