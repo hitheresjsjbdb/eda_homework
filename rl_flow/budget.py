@@ -21,6 +21,19 @@ def case_bucket(
     return "large"
 
 
+def case_bucket_index(
+    init_cost: float,
+    small_threshold: float = 200.0,
+    large_threshold: float = 1000.0,
+) -> int:
+    bucket = case_bucket(init_cost, small_threshold=small_threshold, large_threshold=large_threshold)
+    if bucket == "small":
+        return 0
+    if bucket == "medium":
+        return 1
+    return 2
+
+
 def adapt_search_budget(
     init_cost: float,
     base_max_steps: int,

@@ -9,6 +9,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
+from .budget import case_bucket_index
 from .imap_env import ImapEnv, SearchState
 from .model import PolicyValueNet
 
@@ -65,8 +66,18 @@ def load_policy_checkpoint(path: Path, device: torch.device) -> tuple[PolicyValu
         checkpoint["obs_dim"],
         checkpoint["action_dim"],
         checkpoint["hidden_dim"],
+        checkpoint.get("num_buckets", 3),
     )
-    model.load_state_dict(checkpoint["model_state"])
+    state_dict = dict(checkpoint["model_state"])
+    if "policy_head.weight" in state_dict and "shared_policy_head.weight" not in state_dict:
+        remapped_state_dict = {}
+        for key, value in state_dict.items():
+            if key.startswith("policy_head."):
+                remapped_state_dict["shared_policy_head." + key[len("policy_head."):]] = value
+            else:
+                remapped_state_dict[key] = value
+        state_dict = remapped_state_dict
+    model.load_state_dict(state_dict, strict=False)
     model.to(device)
     model.eval()
     return model, checkpoint
@@ -76,10 +87,14 @@ def policy_logits_value(
     model: PolicyValueNet,
     obs: np.ndarray,
     device: torch.device,
+    bucket_id: int | None = None,
 ) -> tuple[torch.Tensor, float]:
     with torch.no_grad():
         obs_tensor = torch.tensor(obs, dtype=torch.float32, device=device).unsqueeze(0)
-        logits, value = model(obs_tensor)
+        bucket_tensor = None
+        if bucket_id is not None:
+            bucket_tensor = torch.tensor([bucket_id], dtype=torch.long, device=device)
+        logits, value = model(obs_tensor, bucket_tensor)
     return logits[0].detach().cpu(), float(value.item())
 
 
@@ -99,12 +114,15 @@ def sample_episode(
     epsilon: float = 0.1,
 ) -> EpisodeResult:
     obs = env.reset()
+    bucket_id = None
+    if env.initial_snapshot is not None:
+        bucket_id = case_bucket_index(float(env.initial_snapshot.cost))
     done = False
     steps: list[TrajectoryStep] = []
     final_info: dict[str, object] | None = None
 
     while not done:
-        logits, _value = policy_logits_value(model, obs, device)
+        logits, _value = policy_logits_value(model, obs, device, bucket_id=bucket_id)
         scaled_logits = logits / max(1e-3, temperature)
         probs = torch.softmax(scaled_logits, dim=0)
 
@@ -182,6 +200,8 @@ def search_candidates(
     random_mix_prob: float = 0.0,
     expand_workers: int = 1,
     reset_env: bool = True,
+    small_threshold: float = 200.0,
+    large_threshold: float = 1000.0,
 ) -> tuple[list[EpisodeResult], list[DecisionPoint]]:
     if reset_env or env.current_state is None:
         env.reset()
@@ -206,6 +226,11 @@ def search_candidates(
     ]
     terminal_nodes: list[BeamNode] = []
     decision_points: list[DecisionPoint] = []
+    bucket_id = case_bucket_index(
+        float(initial_state.snapshot.cost),
+        small_threshold=small_threshold,
+        large_threshold=large_threshold,
+    )
     node_records: dict[int, dict[str, object]] = {
         0: {
             "obs": np.array(env.observe_state(initial_state), copy=True),
@@ -227,7 +252,7 @@ def search_candidates(
                 continue
 
             node_obs = env.observe_state(node.state)
-            logits, _value = policy_logits_value(model, node_obs, device)
+            logits, _value = policy_logits_value(model, node_obs, device, bucket_id=bucket_id)
             probs = torch.softmax(logits / max(1e-3, temperature), dim=0)
             entropy = float((-(probs * torch.log(probs.clamp_min(1e-12))).sum()).item())
             chosen_indices = _pick_action_indices(
@@ -271,7 +296,7 @@ def search_candidates(
                 predicted = 0.0
                 rank_return = _normalized_return(env, float(info["cost"]))
             else:
-                _next_logits, next_value = policy_logits_value(model, next_obs, device)
+                _next_logits, next_value = policy_logits_value(model, next_obs, device, bucket_id=bucket_id)
                 predicted = next_value
                 rank_return = _normalized_return(env, next_state.snapshot.cost)
             child_node_id = next_node_id
@@ -382,6 +407,8 @@ def beam_search(
     prior_weight: float = 0.0,
     expand_workers: int = 1,
     reset_env: bool = True,
+    small_threshold: float = 200.0,
+    large_threshold: float = 1000.0,
 ) -> dict[str, object]:
     if reset_env or env.current_state is None:
         env.reset()
@@ -405,6 +432,11 @@ def beam_search(
         )
     ]
     best_done: BeamNode | None = None
+    bucket_id = case_bucket_index(
+        float(initial_state.snapshot.cost),
+        small_threshold=small_threshold,
+        large_threshold=large_threshold,
+    )
 
     for _ in range(env.max_steps):
         expanded: list[BeamNode] = []
@@ -415,7 +447,7 @@ def beam_search(
                 continue
 
             node_obs = env.observe_state(node.state)
-            logits, _value = policy_logits_value(model, node_obs, device)
+            logits, _value = policy_logits_value(model, node_obs, device, bucket_id=bucket_id)
             probs = torch.softmax(logits / max(1e-3, temperature), dim=0)
             topk = min(branch_topk, probs.numel())
             top_probs, top_indices = torch.topk(probs, k=topk)
@@ -453,7 +485,7 @@ def beam_search(
                 predicted = 0.0
                 rank_return = _normalized_return(env, float(info["cost"]))
             else:
-                _next_logits, next_value = policy_logits_value(model, next_obs, device)
+                _next_logits, next_value = policy_logits_value(model, next_obs, device, bucket_id=bucket_id)
                 predicted = next_value
                 rank_return = _normalized_return(env, next_state.snapshot.cost)
 

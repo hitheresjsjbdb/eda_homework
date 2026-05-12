@@ -19,7 +19,7 @@ if __package__ is None or __package__ == "":
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from rl_flow.actions import default_macro_actions
-from rl_flow.budget import adapt_search_budget, case_bucket, case_weight
+from rl_flow.budget import adapt_search_budget, case_bucket, case_bucket_index, case_weight
 from rl_flow.imap_env import ImapEnv
 from rl_flow.model import PolicyValueNet
 from rl_flow.policy_search import beam_search, load_policy_checkpoint, search_candidates
@@ -39,6 +39,14 @@ _SAMPLER_BRANCH_TOPK = 4
 _SAMPLER_GUMBEL_SCALE = 0.0
 _SAMPLER_RANDOM_MIX_PROB = 0.0
 _SAMPLER_EXPAND_WORKERS = 1
+_SAMPLER_LABEL_TEMPERATURE = 0.7
+_SAMPLER_LABEL_BEAM_WIDTH = 5
+_SAMPLER_LABEL_BRANCH_TOPK = 4
+_SAMPLER_LABEL_GUMBEL_SCALE = 0.0
+_SAMPLER_LABEL_RANDOM_MIX_PROB = 0.0
+_SAMPLER_LABEL_EXPAND_WORKERS = 1
+_SAMPLER_SMALL_THRESHOLD = 200.0
+_SAMPLER_LARGE_THRESHOLD = 1000.0
 _EVAL_MODEL: PolicyValueNet | None = None
 _EVAL_ACTIONS = None
 _EVAL_CASE_ROOT: Path | None = None
@@ -49,6 +57,8 @@ _EVAL_BEAM_WIDTH = 5
 _EVAL_BRANCH_TOPK = 4
 _EVAL_TEMPERATURE = 1.0
 _EVAL_EXPAND_WORKERS = 1
+_EVAL_SMALL_THRESHOLD = 200.0
+_EVAL_LARGE_THRESHOLD = 1000.0
 
 
 def _group_training_episodes(
@@ -84,29 +94,48 @@ def build_tree_datasets(
     weight_min: float,
     weight_max: float,
     policy_target_temperature: float,
+    policy_min_gap: float,
 ) -> tuple[
-    tuple[torch.Tensor, torch.Tensor, torch.Tensor, dict[str, int]] | None,
+    tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, dict[str, int]] | None,
     tuple[torch.Tensor, torch.Tensor, torch.Tensor, dict[str, int]] | None,
 ]:
     policy_states: dict[tuple[str, bytes], dict[str, object]] = {}
     value_states: dict[tuple[str, bytes], dict[str, object]] = {}
+    source_priority = {"explore": 0, "teacher": 1}
+    source_weight = {"explore": 1.0, "teacher": 1.35}
 
     for item in decisions:
         case_name = str(item["case_name"])
         init_cost = float(item["initial_cost"])
         bucket = case_bucket(init_cost, small_threshold=small_threshold, large_threshold=large_threshold)
         base_weight = case_weight(init_cost, min_weight=weight_min, max_weight=weight_max)
+        source = str(item.get("source", "explore"))
+        source_rank = source_priority.get(source, 0)
+        source_scale = source_weight.get(source, 1.0)
         obs = np.asarray(item["obs"], dtype=np.float32)
         state_key = _state_key(case_name, obs)
         state_return = float(item["state_return"])
 
         value_entry = value_states.get(state_key)
-        if value_entry is None or state_return > float(value_entry["target"]):
+        if (
+            value_entry is None
+            or state_return > float(value_entry["target"])
+            or (
+                state_return == float(value_entry["target"])
+                and source_rank > int(value_entry.get("source_rank", 0))
+            )
+        ):
             value_states[state_key] = {
                 "obs": np.array(obs, copy=True),
                 "target": state_return,
-                "weight": base_weight * (1.0 + max(0.0, state_return) * 4.0),
+                "weight": base_weight * source_scale * (1.0 + max(0.0, state_return) * 4.0),
                 "bucket": bucket,
+                "bucket_id": case_bucket_index(
+                    init_cost,
+                    small_threshold=small_threshold,
+                    large_threshold=large_threshold,
+                ),
+                "source_rank": source_rank,
             }
 
         scored_actions = [(int(action), float(score)) for action, score in item["action_scores"]]
@@ -119,21 +148,42 @@ def build_tree_datasets(
                 "obs": np.array(obs, copy=True),
                 "action_map": {},
                 "target": state_return,
-                "weight": base_weight,
+                "weight": base_weight * source_scale,
                 "bucket": bucket,
+                "bucket_id": case_bucket_index(
+                    init_cost,
+                    small_threshold=small_threshold,
+                    large_threshold=large_threshold,
+                ),
+                "source_rank": source_rank,
             }
             policy_states[state_key] = policy_entry
-        policy_entry["target"] = max(float(policy_entry["target"]), state_return)
-        for action, score in scored_actions:
-            current = policy_entry["action_map"].get(action)
-            if current is None or score > float(current):
-                policy_entry["action_map"][action] = float(score)
+        if source_rank > int(policy_entry.get("source_rank", 0)):
+            policy_entry["obs"] = np.array(obs, copy=True)
+            policy_entry["action_map"] = {}
+            policy_entry["target"] = state_return
+            policy_entry["weight"] = base_weight * source_scale
+            policy_entry["bucket"] = bucket
+            policy_entry["bucket_id"] = case_bucket_index(
+                init_cost,
+                small_threshold=small_threshold,
+                large_threshold=large_threshold,
+            )
+            policy_entry["source_rank"] = source_rank
+        if source_rank == int(policy_entry.get("source_rank", 0)):
+            policy_entry["target"] = max(float(policy_entry["target"]), state_return)
+            policy_entry["weight"] = max(float(policy_entry["weight"]), base_weight * source_scale)
+            for action, score in scored_actions:
+                current = policy_entry["action_map"].get(action)
+                if current is None or score > float(current):
+                    policy_entry["action_map"][action] = float(score)
 
-    def build_policy() -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, dict[str, int]] | None:
+    def build_policy() -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, dict[str, int]] | None:
         obs_rows: list[np.ndarray] = []
         target_rows: list[np.ndarray] = []
         weight_rows: list[float] = []
         bucket_rows: list[str] = []
+        bucket_id_rows: list[int] = []
         for item in policy_states.values():
             action_map = item["action_map"]
             if len(action_map) < 2:
@@ -143,6 +193,8 @@ def build_tree_datasets(
             order = np.argsort(scores)[::-1]
             sorted_scores = scores[order]
             top_gap = float(sorted_scores[0] - sorted_scores[1]) if len(sorted_scores) > 1 else 0.0
+            if top_gap < policy_min_gap:
+                continue
             logits = scores / max(1e-3, policy_target_temperature)
             logits -= float(np.max(logits))
             probs = np.exp(logits)
@@ -159,13 +211,15 @@ def build_tree_datasets(
             target_rows.append(target)
             weight_rows.append(weight)
             bucket_rows.append(str(item["bucket"]))
+            bucket_id_rows.append(int(item["bucket_id"]))
         if not obs_rows:
             return None
         selected = rebalance_indices(bucket_rows, rng, balance_mode)
         obs = torch.tensor(np.stack([obs_rows[i] for i in selected], axis=0), dtype=torch.float32)
         target_tensor = torch.tensor(np.stack([target_rows[i] for i in selected], axis=0), dtype=torch.float32)
         weights = torch.tensor([weight_rows[i] for i in selected], dtype=torch.float32)
-        return obs, target_tensor, weights, _selected_bucket_counts(bucket_rows, selected)
+        bucket_ids = torch.tensor([bucket_id_rows[i] for i in selected], dtype=torch.int64)
+        return obs, target_tensor, weights, bucket_ids, _selected_bucket_counts(bucket_rows, selected)
 
     def build_value() -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, dict[str, int]] | None:
         obs_rows: list[np.ndarray] = []
@@ -266,6 +320,14 @@ def _init_sample_worker(
     gumbel_scale: float,
     random_mix_prob: float,
     expand_workers: int,
+    label_temperature: float,
+    label_beam_width: int,
+    label_branch_topk: int,
+    label_gumbel_scale: float,
+    label_random_mix_prob: float,
+    label_expand_workers: int,
+    small_threshold: float,
+    large_threshold: float,
 ) -> None:
     global _SAMPLER_MODEL
     global _SAMPLER_ACTIONS
@@ -279,6 +341,14 @@ def _init_sample_worker(
     global _SAMPLER_GUMBEL_SCALE
     global _SAMPLER_RANDOM_MIX_PROB
     global _SAMPLER_EXPAND_WORKERS
+    global _SAMPLER_LABEL_TEMPERATURE
+    global _SAMPLER_LABEL_BEAM_WIDTH
+    global _SAMPLER_LABEL_BRANCH_TOPK
+    global _SAMPLER_LABEL_GUMBEL_SCALE
+    global _SAMPLER_LABEL_RANDOM_MIX_PROB
+    global _SAMPLER_LABEL_EXPAND_WORKERS
+    global _SAMPLER_SMALL_THRESHOLD
+    global _SAMPLER_LARGE_THRESHOLD
 
     os.environ["OMP_NUM_THREADS"] = "1"
     os.environ["OPENBLAS_NUM_THREADS"] = "1"
@@ -296,6 +366,14 @@ def _init_sample_worker(
     _SAMPLER_GUMBEL_SCALE = gumbel_scale
     _SAMPLER_RANDOM_MIX_PROB = random_mix_prob
     _SAMPLER_EXPAND_WORKERS = expand_workers
+    _SAMPLER_LABEL_TEMPERATURE = label_temperature
+    _SAMPLER_LABEL_BEAM_WIDTH = label_beam_width
+    _SAMPLER_LABEL_BRANCH_TOPK = label_branch_topk
+    _SAMPLER_LABEL_GUMBEL_SCALE = label_gumbel_scale
+    _SAMPLER_LABEL_RANDOM_MIX_PROB = label_random_mix_prob
+    _SAMPLER_LABEL_EXPAND_WORKERS = label_expand_workers
+    _SAMPLER_SMALL_THRESHOLD = small_threshold
+    _SAMPLER_LARGE_THRESHOLD = large_threshold
 
 
 def _sample_case_worker(case_name: str, episodes_per_case: int, seed: int) -> dict[str, list[dict]]:
@@ -338,11 +416,14 @@ def _sample_case_worker(case_name: str, episodes_per_case: int, seed: int) -> di
         random_mix_prob=_SAMPLER_RANDOM_MIX_PROB,
         expand_workers=_SAMPLER_EXPAND_WORKERS,
         reset_env=False,
+        small_threshold=_SAMPLER_SMALL_THRESHOLD,
+        large_threshold=_SAMPLER_LARGE_THRESHOLD,
     )
     for episode in candidates:
         records.append(
             {
                 "case_name": case_name,
+                "source": "explore",
                 "steps": episode.steps,
                 "cost": episode.final_cost,
                 "area": episode.final_area,
@@ -353,11 +434,55 @@ def _sample_case_worker(case_name: str, episodes_per_case: int, seed: int) -> di
                 "done_reason": episode.done_reason,
             }
         )
-    for decision in decisions:
+    env.reset()
+    if env.initial_snapshot is None:
+        raise RuntimeError("failed to initialize environment")
+    label_init_cost = float(env.initial_snapshot.cost)
+    label_max_steps, label_beam_width, label_branch_topk = adapt_search_budget(
+        label_init_cost,
+        _SAMPLER_MAX_STEPS,
+        _SAMPLER_LABEL_BEAM_WIDTH,
+        _SAMPLER_LABEL_BRANCH_TOPK,
+    )
+    env.max_steps = label_max_steps
+    label_candidates, label_decisions = search_candidates(
+        env=env,
+        model=_SAMPLER_MODEL,
+        device=torch.device("cpu"),
+        rng=random.Random(seed + 9173),
+        num_candidates=1,
+        beam_width=label_beam_width,
+        branch_topk=label_branch_topk,
+        temperature=_SAMPLER_LABEL_TEMPERATURE,
+        gumbel_scale=_SAMPLER_LABEL_GUMBEL_SCALE,
+        random_mix_prob=_SAMPLER_LABEL_RANDOM_MIX_PROB,
+        expand_workers=_SAMPLER_LABEL_EXPAND_WORKERS,
+        reset_env=False,
+        small_threshold=_SAMPLER_SMALL_THRESHOLD,
+        large_threshold=_SAMPLER_LARGE_THRESHOLD,
+    )
+    if label_candidates:
+        best_label = min(label_candidates, key=lambda item: float(item.final_cost))
+        records.append(
+            {
+                "case_name": case_name,
+                "source": "teacher",
+                "steps": best_label.steps,
+                "cost": best_label.final_cost,
+                "area": best_label.final_area,
+                "depth": best_label.final_depth,
+                "sequence": best_label.final_sequence,
+                "final_return": best_label.final_return,
+                "initial_cost": label_init_cost,
+                "done_reason": best_label.done_reason,
+            }
+        )
+    for decision in label_decisions:
         decision_records.append(
             {
                 "case_name": case_name,
-                "initial_cost": init_cost,
+                "source": "teacher",
+                "initial_cost": label_init_cost,
                 "obs": np.array(decision.obs, copy=True),
                 "state_return": float(decision.state_return),
                 "action_scores": [(int(action), float(score)) for action, score in decision.action_scores],
@@ -376,6 +501,8 @@ def _init_eval_worker(
     branch_topk: int,
     temperature: float,
     expand_workers: int,
+    small_threshold: float,
+    large_threshold: float,
 ) -> None:
     global _EVAL_MODEL
     global _EVAL_ACTIONS
@@ -387,6 +514,8 @@ def _init_eval_worker(
     global _EVAL_BRANCH_TOPK
     global _EVAL_TEMPERATURE
     global _EVAL_EXPAND_WORKERS
+    global _EVAL_SMALL_THRESHOLD
+    global _EVAL_LARGE_THRESHOLD
 
     os.environ["OMP_NUM_THREADS"] = "1"
     os.environ["OPENBLAS_NUM_THREADS"] = "1"
@@ -402,6 +531,8 @@ def _init_eval_worker(
     _EVAL_BRANCH_TOPK = branch_topk
     _EVAL_TEMPERATURE = temperature
     _EVAL_EXPAND_WORKERS = expand_workers
+    _EVAL_SMALL_THRESHOLD = small_threshold
+    _EVAL_LARGE_THRESHOLD = large_threshold
 
 
 def _evaluate_case_worker(case_name: str) -> dict[str, object]:
@@ -436,6 +567,8 @@ def _evaluate_case_worker(case_name: str) -> dict[str, object]:
         temperature=_EVAL_TEMPERATURE,
         expand_workers=_EVAL_EXPAND_WORKERS,
         reset_env=False,
+        small_threshold=_EVAL_SMALL_THRESHOLD,
+        large_threshold=_EVAL_LARGE_THRESHOLD,
     )
     result["case_name"] = case_name
     case_dir = _EVAL_CASE_ROOT / case_name
@@ -466,6 +599,14 @@ def collect_episodes_parallel(
     gumbel_scale: float,
     random_mix_prob: float,
     expand_workers: int,
+    label_temperature: float,
+    label_beam_width: int,
+    label_branch_topk: int,
+    label_gumbel_scale: float,
+    label_random_mix_prob: float,
+    label_expand_workers: int,
+    small_threshold: float,
+    large_threshold: float,
     mp_start_method: str,
 ) -> tuple[list[dict], list[dict]]:
     ctx = mp.get_context(mp_start_method)
@@ -487,6 +628,14 @@ def collect_episodes_parallel(
             gumbel_scale,
             random_mix_prob,
             expand_workers,
+            label_temperature,
+            label_beam_width,
+            label_branch_topk,
+            label_gumbel_scale,
+            label_random_mix_prob,
+            label_expand_workers,
+            small_threshold,
+            large_threshold,
         ),
     ) as executor:
         futures = []
@@ -563,6 +712,8 @@ def evaluate_split(
                 branch_topk,
                 temperature,
                 expand_workers,
+                small_threshold,
+                large_threshold,
             ),
         ) as executor:
             futures = [executor.submit(_evaluate_case_worker, case_name) for case_name in case_names]
@@ -621,6 +772,8 @@ def evaluate_split(
                 temperature=temperature,
                 expand_workers=expand_workers,
                 reset_env=False,
+                small_threshold=small_threshold,
+                large_threshold=large_threshold,
             )
             result["case_name"] = case_name
             result["initial_cost"] = init_cost
@@ -672,6 +825,7 @@ def save_checkpoint(
     obs_dim: int,
     action_dim: int,
     hidden_dim: int,
+    num_buckets: int,
     archive: dict[str, dict],
     extra: dict[str, object],
 ) -> None:
@@ -692,6 +846,7 @@ def save_checkpoint(
             "obs_dim": obs_dim,
             "action_dim": action_dim,
             "hidden_dim": hidden_dim,
+            "num_buckets": num_buckets,
             "model_state": {k: v.detach().cpu() for k, v in model.state_dict().items()},
             "archive": serializable_archive,
             "meta": extra,
@@ -706,6 +861,7 @@ def save_sampling_checkpoint(
     obs_dim: int,
     action_dim: int,
     hidden_dim: int,
+    num_buckets: int,
 ) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     torch.save(
@@ -713,6 +869,7 @@ def save_sampling_checkpoint(
             "obs_dim": obs_dim,
             "action_dim": action_dim,
             "hidden_dim": hidden_dim,
+            "num_buckets": num_buckets,
             "model_state": {k: v.detach().cpu() for k, v in model.state_dict().items()},
         },
         path,
@@ -740,6 +897,7 @@ def main() -> int:
     parser.add_argument("--value-coef", type=float, default=1.0)
     parser.add_argument("--imitation-coef", type=float, default=0.0)
     parser.add_argument("--policy-target-temperature", type=float, default=0.05)
+    parser.add_argument("--policy-min-gap", type=float, default=0.01)
     parser.add_argument("--ranking-margin", type=float, default=0.05)
     parser.add_argument("--min-return-gap", type=float, default=0.01)
     parser.add_argument("--max-pairs-per-bucket", type=int, default=8)
@@ -756,6 +914,12 @@ def main() -> int:
     parser.add_argument("--train-beam-width", type=int, default=4)
     parser.add_argument("--train-branch-topk", type=int, default=4)
     parser.add_argument("--train-search-workers", type=int, default=1)
+    parser.add_argument("--label-temperature", type=float, default=0.7)
+    parser.add_argument("--label-beam-width", type=int, default=6)
+    parser.add_argument("--label-branch-topk", type=int, default=5)
+    parser.add_argument("--label-search-workers", type=int, default=1)
+    parser.add_argument("--label-gumbel-scale", type=float, default=0.0)
+    parser.add_argument("--label-random-mix-prob", type=float, default=0.0)
     parser.add_argument("--search-gumbel-scale", type=float, default=0.4)
     parser.add_argument("--search-random-mix-prob", type=float, default=0.1)
     parser.add_argument("--grad-clip", type=float, default=5.0)
@@ -790,7 +954,8 @@ def main() -> int:
     obs_dim = int(probe_env.reset().shape[0])
     action_dim = len(actions)
 
-    model = PolicyValueNet(obs_dim, action_dim, args.hidden_dim).to(device)
+    num_buckets = 3
+    model = PolicyValueNet(obs_dim, action_dim, args.hidden_dim, num_buckets).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
     num_workers = args.num_workers if args.num_workers > 0 else min(8, os.cpu_count() or 1)
     eval_workers = args.eval_workers if args.eval_workers > 0 else num_workers
@@ -817,6 +982,7 @@ def main() -> int:
             obs_dim,
             action_dim,
             args.hidden_dim,
+            model.num_buckets,
         )
         try:
             if num_workers > 1 and len(train_cases) > 1:
@@ -836,6 +1002,14 @@ def main() -> int:
                     gumbel_scale=args.search_gumbel_scale,
                     random_mix_prob=args.search_random_mix_prob,
                     expand_workers=args.train_search_workers,
+                    label_temperature=args.label_temperature,
+                    label_beam_width=args.label_beam_width,
+                    label_branch_topk=args.label_branch_topk,
+                    label_gumbel_scale=args.label_gumbel_scale,
+                    label_random_mix_prob=args.label_random_mix_prob,
+                    label_expand_workers=args.label_search_workers,
+                    small_threshold=args.small_cost_threshold,
+                    large_threshold=args.large_cost_threshold,
                     mp_start_method=mp_start_method,
                 )
             else:
@@ -877,11 +1051,14 @@ def main() -> int:
                         random_mix_prob=args.search_random_mix_prob,
                         expand_workers=args.train_search_workers,
                         reset_env=False,
+                        small_threshold=args.small_cost_threshold,
+                        large_threshold=args.large_cost_threshold,
                     )
                     for episode in candidates:
                         collected.append(
                             {
                                 "case_name": case_name,
+                                "source": "explore",
                                 "steps": episode.steps,
                                 "cost": episode.final_cost,
                                 "area": episode.final_area,
@@ -896,7 +1073,63 @@ def main() -> int:
                         collected_decisions.append(
                             {
                                 "case_name": case_name,
+                                "source": "explore",
                                 "initial_cost": init_cost,
+                                "obs": np.array(decision.obs, copy=True),
+                                "state_return": float(decision.state_return),
+                                "action_scores": [(int(action), float(score)) for action, score in decision.action_scores],
+                            }
+                        )
+                    env.reset()
+                    if env.initial_snapshot is None:
+                        raise RuntimeError("failed to initialize environment")
+                    label_init_cost = float(env.initial_snapshot.cost)
+                    label_max_steps, label_beam_width, label_branch_topk = adapt_search_budget(
+                        label_init_cost,
+                        args.max_steps,
+                        args.label_beam_width,
+                        args.label_branch_topk,
+                    )
+                    env.max_steps = label_max_steps
+                    label_rng = random.Random(args.seed + epoch * 1000003 + case_index * 100003 + 9173)
+                    label_candidates, label_decisions = search_candidates(
+                        env=env,
+                        model=model,
+                        device=device,
+                        rng=label_rng,
+                        num_candidates=1,
+                        beam_width=label_beam_width,
+                        branch_topk=label_branch_topk,
+                        temperature=args.label_temperature,
+                        gumbel_scale=args.label_gumbel_scale,
+                        random_mix_prob=args.label_random_mix_prob,
+                        expand_workers=args.label_search_workers,
+                        reset_env=False,
+                        small_threshold=args.small_cost_threshold,
+                        large_threshold=args.large_cost_threshold,
+                    )
+                    if label_candidates:
+                        best_label = min(label_candidates, key=lambda item: float(item.final_cost))
+                        collected.append(
+                            {
+                                "case_name": case_name,
+                                "source": "teacher",
+                                "steps": best_label.steps,
+                                "cost": best_label.final_cost,
+                                "area": best_label.final_area,
+                                "depth": best_label.final_depth,
+                                "sequence": best_label.final_sequence,
+                                "final_return": best_label.final_return,
+                                "initial_cost": label_init_cost,
+                                "done_reason": best_label.done_reason,
+                            }
+                        )
+                    for decision in label_decisions:
+                        collected_decisions.append(
+                            {
+                                "case_name": case_name,
+                                "source": "teacher",
+                                "initial_cost": label_init_cost,
                                 "obs": np.array(decision.obs, copy=True),
                                 "state_return": float(decision.state_return),
                                 "action_scores": [(int(action), float(score)) for action, score in decision.action_scores],
@@ -924,6 +1157,7 @@ def main() -> int:
             weight_min=args.case_weight_min,
             weight_max=args.case_weight_max,
             policy_target_temperature=args.policy_target_temperature,
+            policy_min_gap=args.policy_min_gap,
         )
 
         model.train()
@@ -938,11 +1172,13 @@ def main() -> int:
         policy_obs = None
         policy_targets = None
         policy_weights = None
+        policy_bucket_ids = None
         if policy_dataset is not None:
-            policy_obs, policy_targets, policy_weights, policy_bucket_counts = policy_dataset
+            policy_obs, policy_targets, policy_weights, policy_bucket_ids, policy_bucket_counts = policy_dataset
             policy_obs = policy_obs.to(device)
             policy_targets = policy_targets.to(device)
             policy_weights = policy_weights.to(device)
+            policy_bucket_ids = policy_bucket_ids.to(device)
 
         value_obs = None
         value_targets = None
@@ -960,7 +1196,8 @@ def main() -> int:
                     batch_obs = policy_obs.index_select(0, batch_idx)
                     batch_targets = policy_targets.index_select(0, batch_idx)
                     batch_weights = policy_weights.index_select(0, batch_idx)
-                    logits, _values = model(batch_obs)
+                    batch_bucket_ids = policy_bucket_ids.index_select(0, batch_idx)
+                    logits, _values = model(batch_obs, batch_bucket_ids)
                     log_probs = torch.log_softmax(logits, dim=-1)
                     policy_loss = -(batch_targets * log_probs).sum(dim=-1)
                     policy_loss = (policy_loss * batch_weights).sum() / batch_weights.sum().clamp_min(1e-6)
@@ -997,9 +1234,10 @@ def main() -> int:
                 for batch in minibatch_indices(policy_obs.shape[0], args.batch_size, rng):
                     batch_idx = torch.tensor(batch, dtype=torch.int64, device=device)
                     batch_obs = policy_obs.index_select(0, batch_idx)
+                    batch_bucket_ids = policy_bucket_ids.index_select(0, batch_idx)
                     batch_actions = torch.argmax(policy_targets.index_select(0, batch_idx), dim=-1)
                     batch_weights = policy_weights.index_select(0, batch_idx)
-                    logits, _values = model(batch_obs)
+                    logits, _values = model(batch_obs, batch_bucket_ids)
                     imitation_loss = nn.functional.cross_entropy(logits, batch_actions, reduction="none")
                     imitation_loss = (imitation_loss * batch_weights).sum() / batch_weights.sum().clamp_min(1e-6)
                     loss = args.imitation_coef * imitation_loss
@@ -1023,6 +1261,10 @@ def main() -> int:
             small_threshold=args.small_cost_threshold,
             large_threshold=args.large_cost_threshold,
         )
+        decision_source_counts = {"explore": 0, "teacher": 0}
+        for decision in collected_decisions:
+            decision_source = str(decision.get("source", "explore"))
+            decision_source_counts[decision_source] = decision_source_counts.get(decision_source, 0) + 1
         summary = {
             "epoch": epoch,
             "train_avg_cost": train_avg_cost,
@@ -1040,6 +1282,7 @@ def main() -> int:
             "value_examples": 0 if value_obs is None else int(value_obs.shape[0]),
             "policy_bucket_counts": policy_bucket_counts,
             "value_bucket_counts": value_bucket_counts,
+            "decision_source_counts": decision_source_counts,
             "train_bucket_stats": train_bucket_stats,
         }
 
@@ -1051,6 +1294,7 @@ def main() -> int:
                 obs_dim,
                 action_dim,
                 args.hidden_dim,
+                model.num_buckets,
             )
             try:
                 eval_summary = evaluate_split(
@@ -1091,6 +1335,7 @@ def main() -> int:
                     obs_dim,
                     action_dim,
                     args.hidden_dim,
+                    model.num_buckets,
                     archive,
                     {"best_eval_cost": best_eval_cost, "epoch": epoch, "train_args": vars(args)},
                 )
@@ -1102,6 +1347,7 @@ def main() -> int:
                 obs_dim,
                 action_dim,
                 args.hidden_dim,
+                model.num_buckets,
                 archive,
                 {"epoch": epoch, "train_args": vars(args)},
             )
@@ -1136,7 +1382,8 @@ def main() -> int:
         print(
             "train datasets: "
             f"policy={summary['policy_examples']} {summary['policy_bucket_counts']} "
-            f"value={summary['value_examples']} {summary['value_bucket_counts']}"
+            f"value={summary['value_examples']} {summary['value_bucket_counts']} "
+            f"sources={summary['decision_source_counts']}"
         )
         if "eval_bucket_stats" in summary:
             eval_bucket_line = " | ".join(

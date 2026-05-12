@@ -26,6 +26,8 @@ def main() -> int:
     parser.add_argument("--beam-branch-topk", type=int, default=4)
     parser.add_argument("--search-workers", type=int, default=1)
     parser.add_argument("--temperature", type=float, default=1.0)
+    parser.add_argument("--small-cost-threshold", type=float, default=200.0)
+    parser.add_argument("--large-cost-threshold", type=float, default=1000.0)
     parser.add_argument("--timeout-sec", type=float, default=60.0)
     parser.add_argument("--device", type=str, default="auto")
     args = parser.parse_args()
@@ -64,6 +66,8 @@ def main() -> int:
         temperature=args.temperature,
         expand_workers=args.search_workers,
         reset_env=False,
+        small_threshold=args.small_cost_threshold,
+        large_threshold=args.large_cost_threshold,
     )
 
     args.output_seq.parent.mkdir(parents=True, exist_ok=True)

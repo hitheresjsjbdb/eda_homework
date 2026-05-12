@@ -111,6 +111,8 @@ def _evaluate_case_worker(case_name: str) -> dict[str, object]:
         temperature=_EVAL_TEMPERATURE,
         expand_workers=_EVAL_EXPAND_WORKERS,
         reset_env=False,
+        small_threshold=_EVAL_SMALL_THRESHOLD,
+        large_threshold=_EVAL_LARGE_THRESHOLD,
     )
     ref = read_ref_qor(case_dir)
     item = {
@@ -256,6 +258,8 @@ def main() -> int:
                 temperature=args.temperature,
                 expand_workers=args.search_workers,
                 reset_env=False,
+                small_threshold=args.small_cost_threshold,
+                large_threshold=args.large_cost_threshold,
             )
 
             ref = read_ref_qor(case_dir)

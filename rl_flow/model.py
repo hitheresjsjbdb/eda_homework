@@ -5,8 +5,9 @@ from torch import nn
 
 
 class PolicyValueNet(nn.Module):
-    def __init__(self, obs_dim: int, action_dim: int, hidden_dim: int = 128) -> None:
+    def __init__(self, obs_dim: int, action_dim: int, hidden_dim: int = 128, num_buckets: int = 3) -> None:
         super().__init__()
+        self.num_buckets = num_buckets
         self.encoder = nn.Sequential(
             nn.Linear(obs_dim, hidden_dim),
             nn.LayerNorm(hidden_dim),
@@ -23,11 +24,32 @@ class PolicyValueNet(nn.Module):
             nn.Linear(hidden_dim, hidden_dim),
             nn.GELU(),
         )
-        self.policy_head = nn.Linear(hidden_dim, action_dim)
+        self.shared_policy_head = nn.Linear(hidden_dim, action_dim)
+        self.bucket_policy_heads = nn.ModuleList(
+            nn.Linear(hidden_dim, action_dim) for _ in range(num_buckets)
+        )
         self.value_head = nn.Linear(hidden_dim, 1)
+        for head in self.bucket_policy_heads:
+            nn.init.zeros_(head.weight)
+            nn.init.zeros_(head.bias)
 
-    def forward(self, obs: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    def forward(
+        self,
+        obs: torch.Tensor,
+        bucket_ids: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         hidden = self.encoder(obs)
-        logits = self.policy_head(self.policy_tower(hidden))
+        policy_hidden = self.policy_tower(hidden)
+        logits = self.shared_policy_head(policy_hidden)
+        if bucket_ids is not None:
+            if bucket_ids.dim() == 0:
+                bucket_ids = bucket_ids.unsqueeze(0)
+            bucket_ids = bucket_ids.to(device=policy_hidden.device, dtype=torch.long).clamp(0, len(self.bucket_policy_heads) - 1)
+            bucket_delta = torch.zeros_like(logits)
+            for bucket_idx, head in enumerate(self.bucket_policy_heads):
+                mask = bucket_ids == bucket_idx
+                if mask.any():
+                    bucket_delta[mask] = head(policy_hidden[mask])
+            logits = logits + bucket_delta
         value = self.value_head(self.value_tower(hidden)).squeeze(-1)
         return logits, value
