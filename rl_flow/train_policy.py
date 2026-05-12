@@ -46,6 +46,7 @@ _SAMPLER_LABEL_GUMBEL_SCALE = 0.0
 _SAMPLER_LABEL_RANDOM_MIX_PROB = 0.0
 _SAMPLER_LABEL_EXPAND_WORKERS = 1
 _SAMPLER_SHARED_LABEL_SEARCH = True
+_SAMPLER_SHARED_LABEL_USE_TEACHER_BUDGET = False
 _SAMPLER_SMALL_THRESHOLD = 200.0
 _SAMPLER_LARGE_THRESHOLD = 1000.0
 _EVAL_MODEL: PolicyValueNet | None = None
@@ -328,6 +329,7 @@ def _init_sample_worker(
     label_random_mix_prob: float,
     label_expand_workers: int,
     shared_label_search: bool,
+    shared_label_use_teacher_budget: bool,
     small_threshold: float,
     large_threshold: float,
 ) -> None:
@@ -350,6 +352,7 @@ def _init_sample_worker(
     global _SAMPLER_LABEL_RANDOM_MIX_PROB
     global _SAMPLER_LABEL_EXPAND_WORKERS
     global _SAMPLER_SHARED_LABEL_SEARCH
+    global _SAMPLER_SHARED_LABEL_USE_TEACHER_BUDGET
     global _SAMPLER_SMALL_THRESHOLD
     global _SAMPLER_LARGE_THRESHOLD
 
@@ -376,6 +379,7 @@ def _init_sample_worker(
     _SAMPLER_LABEL_RANDOM_MIX_PROB = label_random_mix_prob
     _SAMPLER_LABEL_EXPAND_WORKERS = label_expand_workers
     _SAMPLER_SHARED_LABEL_SEARCH = shared_label_search
+    _SAMPLER_SHARED_LABEL_USE_TEACHER_BUDGET = shared_label_use_teacher_budget
     _SAMPLER_SMALL_THRESHOLD = small_threshold
     _SAMPLER_LARGE_THRESHOLD = large_threshold
 
@@ -403,7 +407,7 @@ def _sample_case_worker(case_name: str, episodes_per_case: int, seed: int) -> di
         _SAMPLER_BEAM_WIDTH,
         _SAMPLER_BRANCH_TOPK,
     )
-    if _SAMPLER_SHARED_LABEL_SEARCH:
+    if _SAMPLER_SHARED_LABEL_SEARCH and _SAMPLER_SHARED_LABEL_USE_TEACHER_BUDGET:
         beam_width = max(beam_width, _SAMPLER_LABEL_BEAM_WIDTH)
         branch_topk = max(branch_topk, _SAMPLER_LABEL_BRANCH_TOPK)
         temperature = _SAMPLER_LABEL_TEMPERATURE
@@ -632,6 +636,7 @@ def collect_episodes_parallel(
     label_random_mix_prob: float,
     label_expand_workers: int,
     shared_label_search: bool,
+    shared_label_use_teacher_budget: bool,
     small_threshold: float,
     large_threshold: float,
     mp_start_method: str,
@@ -662,6 +667,7 @@ def collect_episodes_parallel(
             label_random_mix_prob,
             label_expand_workers,
             shared_label_search,
+            shared_label_use_teacher_budget,
             small_threshold,
             large_threshold,
         ),
@@ -949,6 +955,7 @@ def main() -> int:
     parser.add_argument("--label-gumbel-scale", type=float, default=0.0)
     parser.add_argument("--label-random-mix-prob", type=float, default=0.0)
     parser.add_argument("--separate-label-search", action="store_true")
+    parser.add_argument("--shared-label-use-teacher-budget", action="store_true")
     parser.add_argument("--search-gumbel-scale", type=float, default=0.4)
     parser.add_argument("--search-random-mix-prob", type=float, default=0.1)
     parser.add_argument("--grad-clip", type=float, default=5.0)
@@ -992,6 +999,7 @@ def main() -> int:
     if mp_start_method == "auto":
         mp_start_method = "spawn" if device.type == "cuda" else "fork"
     shared_label_search = not args.separate_label_search
+    shared_label_use_teacher_budget = args.shared_label_use_teacher_budget
 
     print(f"train device: {device}")
     print(f"collect workers: {num_workers}")
@@ -1039,6 +1047,7 @@ def main() -> int:
                     label_random_mix_prob=args.label_random_mix_prob,
                     label_expand_workers=args.label_search_workers,
                     shared_label_search=shared_label_search,
+                    shared_label_use_teacher_budget=shared_label_use_teacher_budget,
                     small_threshold=args.small_cost_threshold,
                     large_threshold=args.large_cost_threshold,
                     mp_start_method=mp_start_method,
@@ -1067,7 +1076,7 @@ def main() -> int:
                         args.train_beam_width,
                         args.train_branch_topk,
                     )
-                    if shared_label_search:
+                    if shared_label_search and shared_label_use_teacher_budget:
                         beam_width = max(beam_width, args.label_beam_width)
                         branch_topk = max(branch_topk, args.label_branch_topk)
                         temperature = args.label_temperature
