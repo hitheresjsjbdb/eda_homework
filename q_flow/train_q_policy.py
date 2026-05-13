@@ -5,8 +5,10 @@ import argparse
 import hashlib
 import json
 import multiprocessing as mp
+import queue
 import random
 import sys
+import threading
 from pathlib import Path
 
 import numpy as np
@@ -17,10 +19,10 @@ if __package__ is None or __package__ == "":
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from q_flow.actions import default_actions
-from q_flow.common import load_split, progress_iter, resolve_device
+from q_flow.common import load_split, resolve_device
 from q_flow.env import AIGEnv
 from q_flow.model import GreedyQNet
-from q_flow.teacher import TeacherRecord, build_teacher_records
+from q_flow.teacher import TeacherRecord, build_teacher_records, estimate_teacher_states
 
 
 def minibatch_indices(size: int, batch_size: int, rng: random.Random) -> list[list[int]]:
@@ -88,9 +90,12 @@ def masked_q_loss(pred_q: torch.Tensor, target_q: torch.Tensor, action_mask: tor
 def _collect_case_records(task: dict[str, object]) -> dict[str, object]:
     case_name = str(task["case_name"])
     cache_file = Path(str(task["cache_file"]))
+    event_queue = task.get("event_queue")
     if not bool(task["rebuild_cache"]):
         cached = _load_cached_records(cache_file)
         if cached is not None:
+            if event_queue is not None:
+                event_queue.put(("case_done", case_name, len(cached), "cache"))
             return {"case_name": case_name, "records": cached, "source": "cache"}
 
     actions = default_actions()
@@ -101,15 +106,81 @@ def _collect_case_records(task: dict[str, object]) -> dict[str, object]:
         max_steps=int(task["max_steps"]),
         timeout_sec=float(task["timeout_sec"]),
     )
+    if event_queue is not None:
+        event_queue.put(("case_start", case_name, int(task["estimated_states"])))
+
+    def on_progress(delta: int) -> None:
+        if event_queue is not None:
+            event_queue.put(("case_progress", case_name, delta))
+
     records = build_teacher_records(
         env=env,
         actions=actions,
         max_steps=int(task["max_steps"]),
         branch_topk=int(task["branch_topk"]),
         terminal_topk=int(task["terminal_topk"]),
+        progress_callback=on_progress,
     )
     _save_cached_records(cache_file, records)
+    if event_queue is not None:
+        event_queue.put(("case_done", case_name, len(records), "build"))
     return {"case_name": case_name, "records": records, "source": "build"}
+
+
+def _progress_monitor(event_queue, total_cases: int) -> None:
+    try:
+        from tqdm import tqdm
+    except Exception:
+        while True:
+            event = event_queue.get()
+            if event[0] == "all_done":
+                return
+        return
+
+    overall = tqdm(total=total_cases, desc="teacher", unit="case", position=0)
+    bars: dict[str, object] = {}
+    positions: dict[str, int] = {}
+    next_position = 1
+    completed = 0
+    while True:
+        try:
+            event = event_queue.get(timeout=0.2)
+        except queue.Empty:
+            continue
+        kind = event[0]
+        if kind == "all_done":
+            break
+        if kind == "case_start":
+            _kind, case_name, total = event
+            if case_name not in bars:
+                positions[case_name] = next_position
+                next_position += 1
+                bars[case_name] = tqdm(
+                    total=max(1, int(total)),
+                    desc=case_name,
+                    unit="state",
+                    position=positions[case_name],
+                    leave=False,
+                )
+        elif kind == "case_progress":
+            _kind, case_name, delta = event
+            bar = bars.get(case_name)
+            if bar is not None:
+                bar.update(int(delta))
+        elif kind == "case_done":
+            _kind, case_name, record_count, source = event
+            bar = bars.get(case_name)
+            if bar is not None:
+                if getattr(bar, "total", None) is not None and bar.n < bar.total:
+                    bar.update(bar.total - bar.n)
+                bar.set_postfix_str(f"{source},{record_count} rec")
+                bar.close()
+                del bars[case_name]
+            completed += 1
+            overall.update(1)
+    for bar in bars.values():
+        bar.close()
+    overall.close()
 
 
 def main() -> int:
@@ -159,6 +230,8 @@ def main() -> int:
     dataset: list[TeacherRecord] = []
     case_stats: list[dict[str, float | str]] = []
     tasks: list[dict[str, object]] = []
+    manager = None
+    event_queue = None
     for case_name in case_names:
         cache_key = _cache_key(case_name, args.max_steps, args.branch_topk, args.timeout_sec, action_names)
         cache_file = args.cache_dir / f"{case_name}_{cache_key}.npz"
@@ -173,13 +246,20 @@ def main() -> int:
                 "timeout_sec": args.timeout_sec,
                 "branch_topk": args.branch_topk,
                 "terminal_topk": args.terminal_topk,
+                "estimated_states": estimate_teacher_states(args.max_steps, args.branch_topk),
             }
         )
 
     ctx = mp.get_context("spawn")
+    manager = ctx.Manager()
+    event_queue = manager.Queue()
+    for task in tasks:
+        task["event_queue"] = event_queue
+    monitor = threading.Thread(target=_progress_monitor, args=(event_queue, len(tasks)), daemon=True)
+    monitor.start()
     with ctx.Pool(processes=max(1, args.num_workers)) as pool:
         iterator = pool.imap_unordered(_collect_case_records, tasks)
-        for result in progress_iter(iterator, total=len(tasks), desc="teacher", unit="case"):
+        for result in iterator:
             records = result.get("records", [])
             if not records:
                 continue
@@ -187,6 +267,8 @@ def main() -> int:
             source = str(result["source"])
             dataset.extend(records)
             case_stats.append({"case_name": case_name, "records": float(len(records)), "source": source})
+    event_queue.put(("all_done",))
+    monitor.join()
 
     if not dataset:
         raise SystemExit("no teacher records collected")

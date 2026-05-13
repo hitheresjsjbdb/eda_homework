@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 
 import numpy as np
@@ -49,6 +50,15 @@ class SearchTarget:
     best_final: FinalStats
     q_values: np.ndarray
     action_mask: np.ndarray
+
+
+def estimate_teacher_states(max_steps: int, branch_topk: int) -> int:
+    total = 0
+    width = 1
+    for _depth in range(max_steps):
+        total += width
+        width *= max(1, branch_topk)
+    return max(1, total)
 
 
 def _normalized_return(initial_final: FinalStats, final_stats: FinalStats) -> float:
@@ -114,6 +124,7 @@ def build_teacher_records(
     max_steps: int,
     branch_topk: int = 4,
     terminal_topk: int = 2,
+    progress_callback: Callable[[int], None] | None = None,
 ) -> list[TeacherRecord]:
     obs0 = env.reset()
     if obs0 is None or env.initial_state is None:
@@ -198,6 +209,8 @@ def build_teacher_records(
             action_mask=action_mask,
         )
         memo[key] = target
+        if progress_callback is not None:
+            progress_callback(1)
         return target
 
     solve(initial_state)
