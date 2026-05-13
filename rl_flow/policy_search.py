@@ -188,6 +188,8 @@ def _simulate_branch(
 def _is_redundant_action(env: ImapEnv, state: SearchState, action_idx: int) -> bool:
     action = env.actions[action_idx]
     if action.terminal:
+        if action.final_map_command is not None and "-t 1" in action.final_map_command and state.step_index < 2:
+            return True
         return False
     if state.last_action_index < 0:
         return False
@@ -210,6 +212,10 @@ def _is_redundant_action(env: ImapEnv, state: SearchState, action_idx: int) -> b
         if action.commands and action.commands[0] in recent:
             return True
     return False
+
+
+def _obs_key(obs: np.ndarray) -> bytes:
+    return np.asarray(obs, dtype=np.float32).tobytes()
 
 
 def search_candidates(
@@ -371,7 +377,18 @@ def search_candidates(
                 expanded.append(child)
 
         expanded.sort(key=lambda item: item.score, reverse=True)
-        beam = expanded[:beam_width]
+        unique_expanded: list[BeamNode] = []
+        seen_obs: set[bytes] = set()
+        for node in expanded:
+            if node.done:
+                unique_expanded.append(node)
+                continue
+            node_key = _obs_key(env.observe_state(node.state))
+            if node_key in seen_obs:
+                continue
+            seen_obs.add(node_key)
+            unique_expanded.append(node)
+        beam = unique_expanded[:beam_width]
         if len(terminal_nodes) >= num_candidates and not beam:
             break
         if not beam:
@@ -561,7 +578,18 @@ def beam_search(
                 best_done = child
 
         expanded.sort(key=lambda item: item.score, reverse=True)
-        beam = expanded[:beam_width]
+        unique_expanded: list[BeamNode] = []
+        seen_obs: set[bytes] = set()
+        for node in expanded:
+            if node.done:
+                unique_expanded.append(node)
+                continue
+            node_key = _obs_key(env.observe_state(node.state))
+            if node_key in seen_obs:
+                continue
+            seen_obs.add(node_key)
+            unique_expanded.append(node)
+        beam = unique_expanded[:beam_width]
         if beam and all(node.done for node in beam):
             break
 

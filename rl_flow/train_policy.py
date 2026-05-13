@@ -420,6 +420,8 @@ def _sample_case_worker(case_name: str, episodes_per_case: int, seed: int) -> di
         _SAMPLER_BEAM_WIDTH,
         _SAMPLER_BRANCH_TOPK,
     )
+    use_shared_teacher = _SAMPLER_SHARED_LABEL_SEARCH or init_cost < _SAMPLER_TEACHER_MIN_COST
+    reuse_teacher_tree = not use_shared_teacher
     if _SAMPLER_SHARED_LABEL_SEARCH and _SAMPLER_SHARED_LABEL_USE_TEACHER_BUDGET:
         beam_width = max(beam_width, _SAMPLER_LABEL_BEAM_WIDTH)
         branch_topk = max(branch_topk, _SAMPLER_LABEL_BRANCH_TOPK)
@@ -427,6 +429,20 @@ def _sample_case_worker(case_name: str, episodes_per_case: int, seed: int) -> di
         gumbel_scale = max(_SAMPLER_GUMBEL_SCALE, _SAMPLER_LABEL_GUMBEL_SCALE)
         random_mix_prob = max(_SAMPLER_RANDOM_MIX_PROB, _SAMPLER_LABEL_RANDOM_MIX_PROB)
         expand_workers = max(_SAMPLER_EXPAND_WORKERS, _SAMPLER_LABEL_EXPAND_WORKERS)
+    elif reuse_teacher_tree:
+        label_max_steps, label_beam_width, label_branch_topk = adapt_search_budget(
+            init_cost,
+            _SAMPLER_MAX_STEPS,
+            _SAMPLER_LABEL_BEAM_WIDTH,
+            _SAMPLER_LABEL_BRANCH_TOPK,
+        )
+        max_steps = label_max_steps
+        beam_width = label_beam_width
+        branch_topk = label_branch_topk
+        temperature = _SAMPLER_LABEL_TEMPERATURE
+        gumbel_scale = _SAMPLER_LABEL_GUMBEL_SCALE
+        random_mix_prob = _SAMPLER_LABEL_RANDOM_MIX_PROB
+        expand_workers = _SAMPLER_LABEL_EXPAND_WORKERS
     else:
         temperature = _SAMPLER_TEMPERATURE
         gumbel_scale = _SAMPLER_GUMBEL_SCALE
@@ -468,18 +484,30 @@ def _sample_case_worker(case_name: str, episodes_per_case: int, seed: int) -> di
             }
         )
     for decision in decisions:
-        decision_records.append(
-            {
-                "case_name": case_name,
-                "source": "explore",
-                "initial_cost": init_cost,
-                "obs": np.array(decision.obs, copy=True),
-                "state_return": float(decision.state_return),
-                "action_scores": [(int(action), float(score)) for action, score in decision.action_scores],
-            }
-        )
-    use_shared_teacher = _SAMPLER_SHARED_LABEL_SEARCH or init_cost < _SAMPLER_TEACHER_MIN_COST
-    if use_shared_teacher:
+        if not reuse_teacher_tree:
+            decision_records.append(
+                {
+                    "case_name": case_name,
+                    "source": "explore",
+                    "initial_cost": init_cost,
+                    "obs": np.array(decision.obs, copy=True),
+                    "state_return": float(decision.state_return),
+                    "action_scores": [(int(action), float(score)) for action, score in decision.action_scores],
+                }
+            )
+    if reuse_teacher_tree:
+        for decision in decisions:
+            decision_records.append(
+                {
+                    "case_name": case_name,
+                    "source": "teacher",
+                    "initial_cost": init_cost,
+                    "obs": np.array(decision.obs, copy=True),
+                    "state_return": float(decision.state_return),
+                    "action_scores": [(int(action), float(score)) for action, score in decision.action_scores],
+                }
+            )
+    elif use_shared_teacher:
         shared_candidates, shared_decisions = candidates, decisions
         label_init_cost = init_cost
         for decision in shared_decisions:
@@ -1132,6 +1160,8 @@ def main() -> int:
                         args.train_beam_width,
                         args.train_branch_topk,
                     )
+                    use_shared_teacher = shared_label_search or init_cost < args.teacher_min_cost
+                    reuse_teacher_tree = not use_shared_teacher
                     if shared_label_search and shared_label_use_teacher_budget:
                         beam_width = max(beam_width, args.label_beam_width)
                         branch_topk = max(branch_topk, args.label_branch_topk)
@@ -1139,6 +1169,20 @@ def main() -> int:
                         gumbel_scale = max(args.search_gumbel_scale, args.label_gumbel_scale)
                         random_mix_prob = max(args.search_random_mix_prob, args.label_random_mix_prob)
                         expand_workers = max(args.train_search_workers, args.label_search_workers)
+                    elif reuse_teacher_tree:
+                        label_max_steps, label_beam_width, label_branch_topk = adapt_search_budget(
+                            init_cost,
+                            args.max_steps,
+                            args.label_beam_width,
+                            args.label_branch_topk,
+                        )
+                        max_steps = label_max_steps
+                        beam_width = label_beam_width
+                        branch_topk = label_branch_topk
+                        temperature = args.label_temperature
+                        gumbel_scale = args.label_gumbel_scale
+                        random_mix_prob = args.label_random_mix_prob
+                        expand_workers = args.label_search_workers
                     else:
                         temperature = args.temperature
                         gumbel_scale = args.search_gumbel_scale
@@ -1178,18 +1222,30 @@ def main() -> int:
                             }
                         )
                     for decision in decisions:
-                        collected_decisions.append(
-                            {
-                                "case_name": case_name,
-                                "source": "explore",
-                                "initial_cost": init_cost,
-                                "obs": np.array(decision.obs, copy=True),
-                                "state_return": float(decision.state_return),
-                                "action_scores": [(int(action), float(score)) for action, score in decision.action_scores],
-                            }
-                        )
-                    use_shared_teacher = shared_label_search or init_cost < args.teacher_min_cost
-                    if use_shared_teacher:
+                        if not reuse_teacher_tree:
+                            collected_decisions.append(
+                                {
+                                    "case_name": case_name,
+                                    "source": "explore",
+                                    "initial_cost": init_cost,
+                                    "obs": np.array(decision.obs, copy=True),
+                                    "state_return": float(decision.state_return),
+                                    "action_scores": [(int(action), float(score)) for action, score in decision.action_scores],
+                                }
+                            )
+                    if reuse_teacher_tree:
+                        for decision in decisions:
+                            collected_decisions.append(
+                                {
+                                    "case_name": case_name,
+                                    "source": "teacher",
+                                    "initial_cost": init_cost,
+                                    "obs": np.array(decision.obs, copy=True),
+                                    "state_return": float(decision.state_return),
+                                    "action_scores": [(int(action), float(score)) for action, score in decision.action_scores],
+                                }
+                            )
+                    elif use_shared_teacher:
                         for decision in decisions:
                             collected_decisions.append(
                                 {
