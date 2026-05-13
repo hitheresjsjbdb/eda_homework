@@ -91,6 +91,7 @@ class ImapEnv:
         max_steps: int = 4,
         probe_map_command: str = "map_fpga -P 12 -C 6 -G 1 -L 2",
         timeout_sec: float | None = 60.0,
+        probe_timeout_sec: float | None = None,
         use_history: bool = True,
         history_capacity: int = 5,
     ) -> None:
@@ -100,6 +101,11 @@ class ImapEnv:
         self.max_steps = max_steps
         self.probe_map_command = probe_map_command
         self.timeout_sec = timeout_sec
+        self.probe_timeout_sec = (
+            probe_timeout_sec
+            if probe_timeout_sec is not None
+            else (None if timeout_sec is None else max(8.0, min(float(timeout_sec) * 0.35, 20.0)))
+        )
         self.use_history = use_history
         self.history_capacity = history_capacity
         self.initial_snapshot: EvalSnapshot | None = None
@@ -235,7 +241,7 @@ class ImapEnv:
         try:
             if action.terminal:
                 final_map = action.final_map_command or self.probe_map_command
-                final_snapshot = self._evaluate(tuple(next_sequence), final_map)
+                final_snapshot = self._evaluate(tuple(next_sequence), final_map, timeout_override=self.timeout_sec)
                 reward = self._normalized_reward(prev_snapshot.cost - final_snapshot.cost, terminal=True)
                 sequence_str = self._sequence_str(tuple(next_sequence), final_map)
                 return {
@@ -249,7 +255,7 @@ class ImapEnv:
 
             next_sequence.extend(action.commands)
             if state.step_index + 1 >= self.max_steps:
-                final_snapshot = self._evaluate(tuple(next_sequence), self.probe_map_command)
+                final_snapshot = self._evaluate(tuple(next_sequence), self.probe_map_command, timeout_override=self.timeout_sec)
                 reward = self._normalized_reward(prev_snapshot.cost - final_snapshot.cost, terminal=True)
                 sequence_str = self._sequence_str(tuple(next_sequence), self.probe_map_command)
                 return {
@@ -261,7 +267,7 @@ class ImapEnv:
                     "sequence_str": sequence_str,
                 }
 
-            next_snapshot = self._evaluate(tuple(next_sequence), self.probe_map_command)
+            next_snapshot = self._evaluate(tuple(next_sequence), self.probe_map_command, timeout_override=self.probe_timeout_sec)
             reward = self._normalized_reward(prev_snapshot.cost - next_snapshot.cost, terminal=False)
             sequence_str = self._sequence_str(tuple(next_sequence), None)
             return {
@@ -285,7 +291,12 @@ class ImapEnv:
                 reason="action_error",
             )
 
-    def _evaluate(self, sequence: tuple[str, ...], map_command: str) -> EvalSnapshot:
+    def _evaluate(
+        self,
+        sequence: tuple[str, ...],
+        map_command: str,
+        timeout_override: float | None = None,
+    ) -> EvalSnapshot:
         if not self.input_aig.is_file():
             raise FileNotFoundError(self.input_aig)
         if not self.imap_bin.is_file():
@@ -308,7 +319,7 @@ class ImapEnv:
             [str(self.imap_bin), "-c", script],
             capture_output=True,
             text=True,
-            timeout=self.timeout_sec,
+            timeout=timeout_override,
         )
         if proc.returncode != 0:
             raise RuntimeError(proc.stderr or proc.stdout)

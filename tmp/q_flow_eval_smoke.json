@@ -1,0 +1,25 @@
+{
+  "case_count": 1,
+  "success_count": 1,
+  "fail_count": 0,
+  "avg_cost": 22.0,
+  "results": [
+    {
+      "case_name": "int2float",
+      "cost": 22.0,
+      "area": 49,
+      "depth": 4,
+      "actions": [
+        0,
+        0,
+        24
+      ],
+      "sequence": [
+        "balance",
+        "balance",
+        "map_fpga -P 12 -C 6 -G 1 -L 2"
+      ],
+      "ref_cost_gap": 0.9999999999999964
+    }
+  ]
+}

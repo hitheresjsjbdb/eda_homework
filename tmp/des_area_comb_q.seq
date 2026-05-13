@@ -1,0 +1,1 @@
+map_fpga -P 12 -C 6 -G 2 -L 3;

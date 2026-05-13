@@ -51,6 +51,7 @@ _SAMPLER_SMALL_THRESHOLD = 200.0
 _SAMPLER_LARGE_THRESHOLD = 1000.0
 _SAMPLER_TEACHER_MIN_COST = 200.0
 _SAMPLER_PROBE_MAP_COMMAND = "map_fpga -P 12 -C 6 -G 1 -L 2"
+_SAMPLER_SEARCH_TIME_LIMIT_SEC: float | None = None
 _EVAL_MODEL: PolicyValueNet | None = None
 _EVAL_ACTIONS = None
 _EVAL_CASE_ROOT: Path | None = None
@@ -64,6 +65,7 @@ _EVAL_EXPAND_WORKERS = 1
 _EVAL_SMALL_THRESHOLD = 200.0
 _EVAL_LARGE_THRESHOLD = 1000.0
 _EVAL_PROBE_MAP_COMMAND = "map_fpga -P 12 -C 6 -G 1 -L 2"
+_EVAL_SEARCH_TIME_LIMIT_SEC: float | None = None
 
 
 def _group_training_episodes(
@@ -340,6 +342,7 @@ def _init_sample_worker(
     large_threshold: float,
     teacher_min_cost: float,
     probe_map_command: str,
+    search_time_limit_sec: float | None,
 ) -> None:
     global _SAMPLER_MODEL
     global _SAMPLER_ACTIONS
@@ -365,6 +368,7 @@ def _init_sample_worker(
     global _SAMPLER_LARGE_THRESHOLD
     global _SAMPLER_TEACHER_MIN_COST
     global _SAMPLER_PROBE_MAP_COMMAND
+    global _SAMPLER_SEARCH_TIME_LIMIT_SEC
 
     os.environ["OMP_NUM_THREADS"] = "1"
     os.environ["OPENBLAS_NUM_THREADS"] = "1"
@@ -394,6 +398,7 @@ def _init_sample_worker(
     _SAMPLER_LARGE_THRESHOLD = large_threshold
     _SAMPLER_TEACHER_MIN_COST = teacher_min_cost
     _SAMPLER_PROBE_MAP_COMMAND = probe_map_command
+    _SAMPLER_SEARCH_TIME_LIMIT_SEC = search_time_limit_sec
 
 
 def _sample_case_worker(case_name: str, episodes_per_case: int, seed: int) -> dict[str, list[dict]]:
@@ -408,6 +413,7 @@ def _sample_case_worker(case_name: str, episodes_per_case: int, seed: int) -> di
         actions=_SAMPLER_ACTIONS,
         max_steps=_SAMPLER_MAX_STEPS,
         timeout_sec=_SAMPLER_TIMEOUT_SEC,
+        probe_timeout_sec=max(8.0, min(_SAMPLER_TIMEOUT_SEC * 0.25, 18.0)),
         probe_map_command=_SAMPLER_PROBE_MAP_COMMAND,
     )
     env.reset()
@@ -467,6 +473,7 @@ def _sample_case_worker(case_name: str, episodes_per_case: int, seed: int) -> di
         reset_env=False,
         small_threshold=_SAMPLER_SMALL_THRESHOLD,
         large_threshold=_SAMPLER_LARGE_THRESHOLD,
+        search_time_limit_sec=_SAMPLER_SEARCH_TIME_LIMIT_SEC,
     )
     for episode in candidates:
         records.append(
@@ -548,6 +555,7 @@ def _sample_case_worker(case_name: str, episodes_per_case: int, seed: int) -> di
             reset_env=False,
             small_threshold=_SAMPLER_SMALL_THRESHOLD,
             large_threshold=_SAMPLER_LARGE_THRESHOLD,
+            search_time_limit_sec=_SAMPLER_SEARCH_TIME_LIMIT_SEC,
         )
         if shared_candidates:
             best_label = min(shared_candidates, key=lambda item: float(item.final_cost))
@@ -592,6 +600,7 @@ def _init_eval_worker(
     small_threshold: float,
     large_threshold: float,
     probe_map_command: str,
+    search_time_limit_sec: float | None,
 ) -> None:
     global _EVAL_MODEL
     global _EVAL_ACTIONS
@@ -606,6 +615,7 @@ def _init_eval_worker(
     global _EVAL_SMALL_THRESHOLD
     global _EVAL_LARGE_THRESHOLD
     global _EVAL_PROBE_MAP_COMMAND
+    global _EVAL_SEARCH_TIME_LIMIT_SEC
 
     os.environ["OMP_NUM_THREADS"] = "1"
     os.environ["OPENBLAS_NUM_THREADS"] = "1"
@@ -624,6 +634,7 @@ def _init_eval_worker(
     _EVAL_SMALL_THRESHOLD = small_threshold
     _EVAL_LARGE_THRESHOLD = large_threshold
     _EVAL_PROBE_MAP_COMMAND = probe_map_command
+    _EVAL_SEARCH_TIME_LIMIT_SEC = search_time_limit_sec
 
 
 def _evaluate_case_worker(case_name: str) -> dict[str, object]:
@@ -637,6 +648,7 @@ def _evaluate_case_worker(case_name: str) -> dict[str, object]:
         actions=_EVAL_ACTIONS,
         max_steps=_EVAL_MAX_STEPS,
         timeout_sec=_EVAL_TIMEOUT_SEC,
+        probe_timeout_sec=max(8.0, min(_EVAL_TIMEOUT_SEC * 0.35, 24.0)),
         probe_map_command=_EVAL_PROBE_MAP_COMMAND,
     )
     env.reset()
@@ -661,6 +673,7 @@ def _evaluate_case_worker(case_name: str) -> dict[str, object]:
         reset_env=False,
         small_threshold=_EVAL_SMALL_THRESHOLD,
         large_threshold=_EVAL_LARGE_THRESHOLD,
+        search_time_limit_sec=_EVAL_SEARCH_TIME_LIMIT_SEC,
     )
     result["case_name"] = case_name
     case_dir = _EVAL_CASE_ROOT / case_name
@@ -703,6 +716,7 @@ def collect_episodes_parallel(
     large_threshold: float,
     teacher_min_cost: float,
     probe_map_command: str,
+    search_time_limit_sec: float | None,
     mp_start_method: str,
 ) -> tuple[list[dict], list[dict]]:
     ctx = mp.get_context(mp_start_method)
@@ -736,6 +750,7 @@ def collect_episodes_parallel(
             large_threshold,
             teacher_min_cost,
             probe_map_command,
+            search_time_limit_sec,
         ),
     ) as executor:
         futures = []
@@ -783,6 +798,7 @@ def evaluate_split(
     checkpoint_path: Path | None = None,
     mp_start_method: str = "fork",
     probe_map_command: str = "map_fpga -P 12 -C 6 -G 1 -L 2",
+    search_time_limit_sec: float | None = None,
 ) -> dict[str, object]:
     results = []
     total_cost = 0.0
@@ -816,6 +832,7 @@ def evaluate_split(
                 small_threshold,
                 large_threshold,
                 probe_map_command,
+                search_time_limit_sec,
             ),
         ) as executor:
             futures = [executor.submit(_evaluate_case_worker, case_name) for case_name in case_names]
@@ -877,6 +894,7 @@ def evaluate_split(
                 reset_env=False,
                 small_threshold=small_threshold,
                 large_threshold=large_threshold,
+                search_time_limit_sec=search_time_limit_sec,
             )
             result["case_name"] = case_name
             result["initial_cost"] = init_cost
@@ -1041,6 +1059,8 @@ def main() -> int:
     parser.add_argument("--timeout-sec", type=float, default=60.0)
     parser.add_argument("--teacher-min-cost", type=float, default=200.0)
     parser.add_argument("--probe-map-command", type=str, default="map_fpga -P 12 -C 6 -G 1 -L 2")
+    parser.add_argument("--train-search-time-limit-sec", type=float, default=None)
+    parser.add_argument("--eval-search-time-limit-sec", type=float, default=None)
     args = parser.parse_args()
 
     rng = random.Random(args.seed)
@@ -1133,6 +1153,7 @@ def main() -> int:
                     large_threshold=args.large_cost_threshold,
                     teacher_min_cost=args.teacher_min_cost,
                     probe_map_command=args.probe_map_command,
+                    search_time_limit_sec=args.train_search_time_limit_sec,
                     mp_start_method=mp_start_method,
                 )
             else:
@@ -1148,6 +1169,7 @@ def main() -> int:
                         actions=actions,
                         max_steps=args.max_steps,
                         timeout_sec=args.timeout_sec,
+                        probe_timeout_sec=max(8.0, min(args.timeout_sec * 0.25, 18.0)),
                         probe_map_command=args.probe_map_command,
                     )
                     env.reset()
@@ -1205,6 +1227,7 @@ def main() -> int:
                         reset_env=False,
                         small_threshold=args.small_cost_threshold,
                         large_threshold=args.large_cost_threshold,
+                        search_time_limit_sec=args.train_search_time_limit_sec,
                     )
                     for episode in candidates:
                         collected.append(
@@ -1285,6 +1308,7 @@ def main() -> int:
                             reset_env=False,
                             small_threshold=args.small_cost_threshold,
                             large_threshold=args.large_cost_threshold,
+                            search_time_limit_sec=args.train_search_time_limit_sec,
                         )
                         if label_candidates:
                             best_label = min(label_candidates, key=lambda item: float(item.final_cost))
@@ -1497,6 +1521,7 @@ def main() -> int:
                     checkpoint_path=eval_ckpt,
                     mp_start_method=mp_start_method,
                     probe_map_command=args.probe_map_command,
+                    search_time_limit_sec=args.eval_search_time_limit_sec,
                 )
             finally:
                 if eval_ckpt.exists():

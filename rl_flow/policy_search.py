@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import random
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
@@ -235,6 +236,7 @@ def search_candidates(
     reset_env: bool = True,
     small_threshold: float = 200.0,
     large_threshold: float = 1000.0,
+    search_time_limit_sec: float | None = None,
 ) -> tuple[list[EpisodeResult], list[DecisionPoint]]:
     if reset_env or env.current_state is None:
         env.reset()
@@ -275,8 +277,11 @@ def search_candidates(
         }
     }
     next_node_id = 1
+    deadline = None if search_time_limit_sec is None else time.monotonic() + max(0.0, float(search_time_limit_sec))
 
     for _ in range(env.max_steps):
+        if deadline is not None and time.monotonic() >= deadline:
+            break
         expanded: list[BeamNode] = []
         pending: list[PendingExpansion] = []
         for node in beam:
@@ -323,6 +328,8 @@ def search_candidates(
                 }
                 results = []
                 for future in as_completed(futures):
+                    if deadline is not None and time.monotonic() >= deadline:
+                        break
                     results.append((futures[future], future.result()))
         else:
             results = [
@@ -461,6 +468,7 @@ def beam_search(
     reset_env: bool = True,
     small_threshold: float = 200.0,
     large_threshold: float = 1000.0,
+    search_time_limit_sec: float | None = None,
 ) -> dict[str, object]:
     if reset_env or env.current_state is None:
         env.reset()
@@ -489,8 +497,11 @@ def beam_search(
         small_threshold=small_threshold,
         large_threshold=large_threshold,
     )
+    deadline = None if search_time_limit_sec is None else time.monotonic() + max(0.0, float(search_time_limit_sec))
 
     for _ in range(env.max_steps):
+        if deadline is not None and time.monotonic() >= deadline:
+            break
         expanded: list[BeamNode] = []
         pending: list[PendingExpansion] = []
         for node in beam:
@@ -536,6 +547,8 @@ def beam_search(
                 }
                 results = []
                 for future in as_completed(futures):
+                    if deadline is not None and time.monotonic() >= deadline:
+                        break
                     results.append((futures[future], future.result()))
         else:
             results = [
