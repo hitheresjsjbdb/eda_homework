@@ -87,6 +87,15 @@ def masked_q_loss(pred_q: torch.Tensor, target_q: torch.Tensor, action_mask: tor
     return masked.sum() / denom
 
 
+def _emit_event(event_queue, event: tuple[object, ...]) -> None:
+    if event_queue is None:
+        return
+    try:
+        event_queue.put(event)
+    except Exception:
+        return
+
+
 def _collect_case_records(task: dict[str, object]) -> dict[str, object]:
     case_name = str(task["case_name"])
     cache_file = Path(str(task["cache_file"]))
@@ -94,8 +103,7 @@ def _collect_case_records(task: dict[str, object]) -> dict[str, object]:
     if not bool(task["rebuild_cache"]):
         cached = _load_cached_records(cache_file)
         if cached is not None:
-            if event_queue is not None:
-                event_queue.put(("case_done", case_name, len(cached), "cache"))
+            _emit_event(event_queue, ("case_done", case_name, len(cached), "cache"))
             return {"case_name": case_name, "records": cached, "source": "cache"}
 
     actions = default_actions()
@@ -106,25 +114,26 @@ def _collect_case_records(task: dict[str, object]) -> dict[str, object]:
         max_steps=int(task["max_steps"]),
         timeout_sec=float(task["timeout_sec"]),
     )
-    if event_queue is not None:
-        event_queue.put(("case_start", case_name, int(task["estimated_states"])))
+    _emit_event(event_queue, ("case_start", case_name, int(task["estimated_states"])))
 
     def on_progress(delta: int) -> None:
-        if event_queue is not None:
-            event_queue.put(("case_progress", case_name, delta))
+        _emit_event(event_queue, ("case_progress", case_name, delta))
 
-    records = build_teacher_records(
-        env=env,
-        actions=actions,
-        max_steps=int(task["max_steps"]),
-        branch_topk=int(task["branch_topk"]),
-        terminal_topk=int(task["terminal_topk"]),
-        progress_callback=on_progress,
-    )
-    _save_cached_records(cache_file, records)
-    if event_queue is not None:
-        event_queue.put(("case_done", case_name, len(records), "build"))
-    return {"case_name": case_name, "records": records, "source": "build"}
+    try:
+        records = build_teacher_records(
+            env=env,
+            actions=actions,
+            max_steps=int(task["max_steps"]),
+            branch_topk=int(task["branch_topk"]),
+            terminal_topk=int(task["terminal_topk"]),
+            progress_callback=on_progress,
+        )
+        _save_cached_records(cache_file, records)
+        _emit_event(event_queue, ("case_done", case_name, len(records), "build"))
+        return {"case_name": case_name, "records": records, "source": "build"}
+    except Exception as exc:
+        _emit_event(event_queue, ("case_error", case_name, str(exc)))
+        return {"case_name": case_name, "records": [], "source": "error", "error": str(exc)}
 
 
 def _progress_monitor(event_queue, total_cases: int) -> None:
@@ -147,6 +156,8 @@ def _progress_monitor(event_queue, total_cases: int) -> None:
             event = event_queue.get(timeout=0.2)
         except queue.Empty:
             continue
+        except (EOFError, BrokenPipeError, OSError):
+            break
         kind = event[0]
         if kind == "all_done":
             break
@@ -178,6 +189,16 @@ def _progress_monitor(event_queue, total_cases: int) -> None:
                 del bars[case_name]
             completed += 1
             overall.update(1)
+        elif kind == "case_error":
+            _kind, case_name, message = event
+            bar = bars.get(case_name)
+            if bar is not None:
+                bar.set_postfix_str("error")
+                bar.close()
+                del bars[case_name]
+            completed += 1
+            overall.update(1)
+            overall.write(f"[teacher-error] {case_name}: {message}")
     for bar in bars.values():
         bar.close()
     overall.close()
@@ -229,6 +250,7 @@ def main() -> int:
 
     dataset: list[TeacherRecord] = []
     case_stats: list[dict[str, float | str]] = []
+    case_errors: list[dict[str, str]] = []
     tasks: list[dict[str, object]] = []
     manager = None
     event_queue = None
@@ -261,6 +283,14 @@ def main() -> int:
         iterator = pool.imap_unordered(_collect_case_records, tasks)
         for result in iterator:
             records = result.get("records", [])
+            if result.get("source") == "error":
+                case_errors.append(
+                    {
+                        "case_name": str(result["case_name"]),
+                        "error": str(result.get("error", "unknown error")),
+                    }
+                )
+                continue
             if not records:
                 continue
             case_name = str(result["case_name"])
@@ -356,6 +386,7 @@ def main() -> int:
                 "actions": action_names,
                 "records": len(dataset),
                 "cases": len(case_stats),
+                "failed_cases": len(case_errors),
             },
         },
         args.output,
@@ -363,7 +394,7 @@ def main() -> int:
     if args.history_json is not None:
         args.history_json.parent.mkdir(parents=True, exist_ok=True)
         args.history_json.write_text(
-            json.dumps({"history": history, "cases": case_stats}, indent=2),
+            json.dumps({"history": history, "cases": case_stats, "errors": case_errors}, indent=2),
             encoding="utf-8",
         )
     return 0

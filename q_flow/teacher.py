@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+import subprocess
 
 import numpy as np
 
@@ -143,6 +144,18 @@ def build_teacher_records(
     memo: dict[tuple[tuple[str, ...], int], SearchTarget] = {}
     records: dict[tuple[tuple[str, ...], int], TeacherRecord] = {}
 
+    def safe_final(sequence: tuple[str, ...], map_command: str) -> FinalStats | None:
+        try:
+            return env.evaluate_final(sequence, map_command)
+        except (subprocess.TimeoutExpired, RuntimeError):
+            return None
+
+    def safe_next(state: StateStats, action_index: int) -> StateStats | None:
+        try:
+            return env.next_state(state, action_index)
+        except (subprocess.TimeoutExpired, RuntimeError):
+            return None
+
     def solve(state: StateStats) -> SearchTarget:
         key = (state.sequence, state.step_index)
         cached = memo.get(key)
@@ -167,18 +180,28 @@ def build_teacher_records(
             action_mask[action_index] = 1.0
 
             if action.terminal:
-                final_stats = env.evaluate_final(
+                final_stats = safe_final(
                     state.sequence,
                     action.final_map_command or "map_fpga -P 10 -C 6 -G 1 -L 1",
                 )
+                if final_stats is None:
+                    continue
                 action_return = _normalized_return(initial_final, final_stats)
             else:
-                next_state = env.next_state(state, action_index)
+                next_state = safe_next(state, action_index)
+                if next_state is None:
+                    continue
                 if next_state.step_index >= max_steps:
-                    _best_terminal_idx, final_stats = _best_terminal_for_state(env, next_state, teacher_terminal_indices)
+                    try:
+                        _best_terminal_idx, final_stats = _best_terminal_for_state(env, next_state, teacher_terminal_indices)
+                    except (subprocess.TimeoutExpired, RuntimeError):
+                        continue
                     action_return = _normalized_return(initial_final, final_stats)
                 else:
-                    child_target = solve(next_state)
+                    try:
+                        child_target = solve(next_state)
+                    except RuntimeError:
+                        continue
                     final_stats = child_target.best_final
                     action_return = child_target.best_return
 
@@ -189,7 +212,22 @@ def build_teacher_records(
                 best_final = final_stats
 
         if best_final is None:
-            raise RuntimeError("teacher search failed to produce any final state")
+            fallback_final = safe_final(state.sequence, "map_fpga -P 10 -C 6 -G 1 -L 1")
+            if fallback_final is None:
+                raise RuntimeError("teacher search failed to produce any final state")
+            fallback_action = next(
+                (
+                    idx
+                    for idx in teacher_terminal_indices
+                    if (actions[idx].final_map_command or "map_fpga -P 10 -C 6 -G 1 -L 1") == "map_fpga -P 10 -C 6 -G 1 -L 1"
+                ),
+                teacher_terminal_indices[0],
+            )
+            best_action = fallback_action
+            best_final = fallback_final
+            best_return = _normalized_return(initial_final, fallback_final)
+            q_values[fallback_action] = float(best_return)
+            action_mask[fallback_action] = 1.0
 
         record = TeacherRecord(
             obs=np.array(env.observe(state), copy=True),
