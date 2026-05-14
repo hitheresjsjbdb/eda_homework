@@ -20,8 +20,9 @@ if __package__ is None or __package__ == "":
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from q_flow.actions import default_actions
-from q_flow.common import load_split, resolve_device
+from q_flow.common import load_split, progress_iter, read_ref_qor, resolve_device
 from q_flow.env import AIGEnv
+from q_flow.inference import run_policy
 from q_flow.model import GreedyQNet
 from q_flow.teacher import TeacherRecord, build_teacher_records, estimate_teacher_states
 
@@ -138,6 +139,70 @@ def masked_q_loss(pred_q: torch.Tensor, target_q: torch.Tensor, action_mask: tor
     masked = per_item * action_mask
     denom = action_mask.sum().clamp_min(1.0)
     return masked.sum() / denom
+
+
+def evaluate_split(
+    *,
+    model: GreedyQNet,
+    device: torch.device,
+    actions,
+    split_path: Path,
+    split_name: str,
+    case_root: Path,
+    imap_bin: Path,
+    max_steps: int,
+    timeout_sec: float,
+    confidence_margin: float,
+    fallback_topk: int,
+    fallback_depth: int,
+) -> dict[str, float | int]:
+    model.eval()
+    case_names = load_split(split_path, split_name)
+    total_cost = 0.0
+    total_ref_gap = 0.0
+    ref_gap_count = 0
+    fail_count = 0
+
+    for case_name in progress_iter(case_names, desc=f"eval:{split_name}", unit="case"):
+        case_dir = case_root / case_name
+        env = AIGEnv(
+            input_aig=case_dir / f"{case_name}.aig",
+            imap_bin=imap_bin,
+            actions=actions,
+            max_steps=max_steps,
+            timeout_sec=timeout_sec,
+        )
+        try:
+            result = run_policy(
+                env=env,
+                actions=actions,
+                model=model,
+                device=device,
+                confidence_margin=confidence_margin,
+                fallback_topk=fallback_topk,
+                fallback_depth=fallback_depth,
+            )
+        except Exception:
+            fail_count += 1
+            continue
+        total_cost += float(result.final_stats.cost)
+        ref = read_ref_qor(case_dir)
+        if ref is not None:
+            ref_cost = 0.6 * ref["level"] + 0.4 * ref["area"]
+            total_ref_gap += float(result.final_stats.cost) - ref_cost
+            ref_gap_count += 1
+
+    success_count = max(0, len(case_names) - fail_count)
+    summary: dict[str, float | int] = {
+        "case_count": len(case_names),
+        "success_count": success_count,
+        "fail_count": fail_count,
+        "avg_cost": total_cost / max(1, success_count),
+        "fail_pct": 100.0 * fail_count / max(1, len(case_names)),
+    }
+    if ref_gap_count > 0:
+        summary["avg_ref_gap"] = total_ref_gap / ref_gap_count
+    return summary
 
 
 def _emit_event(event_queue, event: tuple[object, ...]) -> None:
@@ -284,6 +349,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Train an offline greedy Q policy for EDA23.")
     parser.add_argument("--split", type=Path, required=True)
     parser.add_argument("--split-name", choices=("train", "eval", "test"), default="train")
+    parser.add_argument("--eval-split-name", choices=("train", "eval", "test"), default=None)
     parser.add_argument("--case-root", type=Path, required=True)
     parser.add_argument("--imap-bin", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
@@ -306,6 +372,11 @@ def main() -> int:
     parser.add_argument("--teacher-aig-timeout-sec", type=float, default=20.0)
     parser.add_argument("--teacher-final-timeout-sec", type=float, default=12.0)
     parser.add_argument("--num-workers", type=int, default=8)
+    parser.add_argument("--eval-every", type=int, default=0)
+    parser.add_argument("--eval-timeout-sec", type=float, default=60.0)
+    parser.add_argument("--confidence-margin", type=float, default=0.08)
+    parser.add_argument("--fallback-topk", type=int, default=3)
+    parser.add_argument("--fallback-depth", type=int, default=2)
     parser.add_argument("--device", type=str, default="auto")
     parser.add_argument("--seed", type=int, default=12345)
     args = parser.parse_args()
@@ -520,13 +591,40 @@ def main() -> int:
             "area_loss": area_sum / max(1, num_batches),
             "depth_loss": depth_sum / max(1, num_batches),
         }
+        if args.eval_split_name is not None and args.eval_every > 0 and epoch % args.eval_every == 0:
+            eval_summary = evaluate_split(
+                model=model,
+                device=device,
+                actions=actions,
+                split_path=args.split,
+                split_name=args.eval_split_name,
+                case_root=args.case_root,
+                imap_bin=args.imap_bin,
+                max_steps=args.max_steps,
+                timeout_sec=args.eval_timeout_sec,
+                confidence_margin=args.confidence_margin,
+                fallback_topk=args.fallback_topk,
+                fallback_depth=args.fallback_depth,
+            )
+            summary["eval_avg_cost"] = float(eval_summary["avg_cost"])
+            summary["eval_fail_pct"] = float(eval_summary["fail_pct"])
+            if "avg_ref_gap" in eval_summary:
+                summary["eval_avg_ref_gap"] = float(eval_summary["avg_ref_gap"])
         history.append(summary)
-        print(
+        message = (
             f"epoch {epoch}/{args.epochs}: records={len(dataset)} "
             f"loss={summary['loss']:.6f} ce={summary['ce_loss']:.6f} "
             f"q={summary['q_loss']:.6f} value={summary['value_loss']:.6f} "
             f"area={summary['area_loss']:.6f} depth={summary['depth_loss']:.6f}"
         )
+        if "eval_avg_cost" in summary:
+            message += (
+                f" eval_avg_cost={summary['eval_avg_cost']:.4f} "
+                f"eval_fail_pct={summary['eval_fail_pct']:.2f}%"
+            )
+            if "eval_avg_ref_gap" in summary:
+                message += f" eval_avg_ref_gap={summary['eval_avg_ref_gap']:.4f}"
+        print(message)
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     torch.save(
