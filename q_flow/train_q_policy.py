@@ -24,6 +24,8 @@ from q_flow.env import AIGEnv
 from q_flow.model import GreedyQNet
 from q_flow.teacher import TeacherRecord, build_teacher_records, estimate_teacher_states
 
+_CACHE_VERSION = 2
+
 
 def minibatch_indices(size: int, batch_size: int, rng: random.Random) -> list[list[int]]:
     indices = list(range(size))
@@ -31,12 +33,21 @@ def minibatch_indices(size: int, batch_size: int, rng: random.Random) -> list[li
     return [indices[i : i + batch_size] for i in range(0, size, batch_size)]
 
 
-def _cache_key(case_name: str, max_steps: int, branch_topk: int, timeout_sec: float, action_names: list[str]) -> str:
+def _cache_key(
+    case_name: str,
+    max_steps: int,
+    branch_topk: int,
+    terminal_topk: int,
+    timeout_sec: float,
+    action_names: list[str],
+) -> str:
     payload = json.dumps(
         {
+            "cache_version": _CACHE_VERSION,
             "case_name": case_name,
             "max_steps": max_steps,
             "branch_topk": branch_topk,
+            "terminal_topk": terminal_topk,
             "timeout_sec": timeout_sec,
             "action_names": action_names,
         },
@@ -254,9 +265,30 @@ def main() -> int:
     tasks: list[dict[str, object]] = []
     manager = None
     event_queue = None
+    cache_hits = 0
+    cache_misses = 0
     for case_name in case_names:
-        cache_key = _cache_key(case_name, args.max_steps, args.branch_topk, args.timeout_sec, action_names)
+        cache_key = _cache_key(
+            case_name,
+            args.max_steps,
+            args.branch_topk,
+            args.terminal_topk,
+            args.timeout_sec,
+            action_names,
+        )
         cache_file = args.cache_dir / f"{case_name}_{cache_key}.npz"
+        if not args.rebuild_cache:
+            try:
+                cached = _load_cached_records(cache_file)
+            except Exception as exc:
+                case_errors.append({"case_name": case_name, "error": f"bad cache: {exc}"})
+                cached = None
+            if cached is not None:
+                dataset.extend(cached)
+                case_stats.append({"case_name": case_name, "records": float(len(cached)), "source": "cache"})
+                cache_hits += 1
+                continue
+        cache_misses += 1
         tasks.append(
             {
                 "case_name": case_name,
@@ -272,33 +304,38 @@ def main() -> int:
             }
         )
 
-    ctx = mp.get_context("spawn")
-    manager = ctx.Manager()
-    event_queue = manager.Queue()
-    for task in tasks:
-        task["event_queue"] = event_queue
-    monitor = threading.Thread(target=_progress_monitor, args=(event_queue, len(tasks)), daemon=True)
-    monitor.start()
-    with ctx.Pool(processes=max(1, args.num_workers)) as pool:
-        iterator = pool.imap_unordered(_collect_case_records, tasks)
-        for result in iterator:
-            records = result.get("records", [])
-            if result.get("source") == "error":
-                case_errors.append(
-                    {
-                        "case_name": str(result["case_name"]),
-                        "error": str(result.get("error", "unknown error")),
-                    }
-                )
-                continue
-            if not records:
-                continue
-            case_name = str(result["case_name"])
-            source = str(result["source"])
-            dataset.extend(records)
-            case_stats.append({"case_name": case_name, "records": float(len(records)), "source": source})
-    event_queue.put(("all_done",))
-    monitor.join()
+    print(f"teacher cache: hits={cache_hits} miss={cache_misses} rebuild={args.rebuild_cache}")
+
+    if tasks:
+        ctx = mp.get_context("spawn")
+        manager = ctx.Manager()
+        event_queue = manager.Queue()
+        for task in tasks:
+            task["event_queue"] = event_queue
+        monitor = threading.Thread(target=_progress_monitor, args=(event_queue, len(tasks)), daemon=True)
+        monitor.start()
+        try:
+            with ctx.Pool(processes=max(1, args.num_workers)) as pool:
+                iterator = pool.imap_unordered(_collect_case_records, tasks)
+                for result in iterator:
+                    records = result.get("records", [])
+                    if result.get("source") == "error":
+                        case_errors.append(
+                            {
+                                "case_name": str(result["case_name"]),
+                                "error": str(result.get("error", "unknown error")),
+                            }
+                        )
+                        continue
+                    if not records:
+                        continue
+                    case_name = str(result["case_name"])
+                    source = str(result["source"])
+                    dataset.extend(records)
+                    case_stats.append({"case_name": case_name, "records": float(len(records)), "source": source})
+        finally:
+            event_queue.put(("all_done",))
+            monitor.join()
 
     if not dataset:
         raise SystemExit("no teacher records collected")
