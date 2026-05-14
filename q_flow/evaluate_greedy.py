@@ -28,6 +28,7 @@ def main() -> int:
     parser.add_argument("--fallback-topk", type=int, default=3)
     parser.add_argument("--fallback-depth", type=int, default=2)
     parser.add_argument("--output-json", type=Path, required=True)
+    parser.add_argument("--quiet-per-case", action="store_true")
     parser.add_argument("--device", type=str, default="auto")
     args = parser.parse_args()
 
@@ -38,6 +39,8 @@ def main() -> int:
 
     results = []
     total_cost = 0.0
+    total_ref_gap = 0.0
+    ref_gap_count = 0
     fail_count = 0
     for case_name in progress_iter(case_names, desc="eval", unit="case"):
         case_dir = args.case_root / case_name
@@ -74,9 +77,23 @@ def main() -> int:
         ref = read_ref_qor(case_dir)
         if ref is not None:
             ref_cost = 0.6 * ref["level"] + 0.4 * ref["area"]
+            item["ref_cost"] = ref_cost
             item["ref_cost_gap"] = item["cost"] - ref_cost
+            total_ref_gap += item["ref_cost_gap"]
+            ref_gap_count += 1
         total_cost += item["cost"]
         results.append(item)
+        if not args.quiet_per_case:
+            if "ref_cost_gap" in item:
+                print(
+                    f"{case_name}: pred_cost={item['cost']:.4f} ref_cost={item['ref_cost']:.4f} "
+                    f"gap={item['ref_cost_gap']:+.4f} area={item['area']} depth={item['depth']}"
+                )
+            else:
+                print(
+                    f"{case_name}: pred_cost={item['cost']:.4f} "
+                    f"area={item['area']} depth={item['depth']} ref_cost=N/A"
+                )
 
     success_count = max(0, len(results) - fail_count)
     output = {
@@ -86,12 +103,18 @@ def main() -> int:
         "avg_cost": total_cost / max(1, success_count),
         "results": results,
     }
+    if ref_gap_count > 0:
+        output["total_ref_gap"] = total_ref_gap
+        output["avg_ref_gap"] = total_ref_gap / ref_gap_count
     args.output_json.parent.mkdir(parents=True, exist_ok=True)
     args.output_json.write_text(json.dumps(output, indent=2), encoding="utf-8")
-    print(
+    summary = (
         f"avg_cost={output['avg_cost']:.4f} success={success_count}/{len(results)} "
         f"fails={fail_count}"
     )
+    if ref_gap_count > 0:
+        summary += f" total_ref_gap={output['total_ref_gap']:+.4f} avg_ref_gap={output['avg_ref_gap']:+.4f}"
+    print(summary)
     return 0
 
 
