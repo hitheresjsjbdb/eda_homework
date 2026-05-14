@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 import subprocess
+import time
 
 import numpy as np
 
@@ -53,12 +54,22 @@ class SearchTarget:
     action_mask: np.ndarray
 
 
-def estimate_teacher_states(max_steps: int, branch_topk: int) -> int:
+def estimate_teacher_states(
+    max_steps: int,
+    branch_topk: int,
+    deep_branch_topk: int = 2,
+    tail_branch_topk: int = 1,
+) -> int:
     total = 0
     width = 1
-    for _depth in range(max_steps):
+    for depth in range(max_steps):
         total += width
-        width *= max(1, branch_topk)
+        if depth == 0:
+            width *= max(1, branch_topk)
+        elif depth == 1:
+            width *= max(1, deep_branch_topk)
+        else:
+            width *= max(1, tail_branch_topk)
     return max(1, total)
 
 
@@ -119,12 +130,39 @@ def _best_terminal_for_state(
     return best_index, best_final
 
 
+def _branch_limit(
+    step_index: int,
+    branch_topk: int,
+    deep_branch_topk: int,
+    tail_branch_topk: int,
+) -> int:
+    if step_index <= 0:
+        return max(1, branch_topk)
+    if step_index == 1:
+        return max(1, min(branch_topk, deep_branch_topk))
+    return max(1, min(branch_topk, tail_branch_topk))
+
+
+def _terminal_limit(
+    step_index: int,
+    terminal_topk: int,
+    deep_terminal_topk: int,
+) -> int:
+    if step_index <= 0:
+        return max(1, terminal_topk)
+    return max(1, min(terminal_topk, deep_terminal_topk))
+
+
 def build_teacher_records(
     env: AIGEnv,
     actions: list[FlowAction],
     max_steps: int,
     branch_topk: int = 4,
+    deep_branch_topk: int = 2,
+    tail_branch_topk: int = 1,
     terminal_topk: int = 2,
+    deep_terminal_topk: int = 1,
+    teacher_budget_sec: float | None = None,
     progress_callback: Callable[[int], None] | None = None,
 ) -> list[TeacherRecord]:
     obs0 = env.reset()
@@ -140,6 +178,15 @@ def build_teacher_records(
         key=lambda idx: actions[idx].teacher_priority,
         reverse=True,
     )[: max(1, terminal_topk)]
+    fast_terminal_index = next(
+        (
+            idx
+            for idx in terminal_indices
+            if (actions[idx].final_map_command or "map_fpga -P 10 -C 6 -G 1 -L 1") == "map_fpga -P 10 -C 6 -G 1 -L 1"
+        ),
+        teacher_terminal_indices[0],
+    )
+    deadline = None if teacher_budget_sec is None or teacher_budget_sec <= 0.0 else (time.monotonic() + teacher_budget_sec)
 
     memo: dict[tuple[tuple[str, ...], int], SearchTarget] = {}
     records: dict[tuple[tuple[str, ...], int], TeacherRecord] = {}
@@ -156,79 +203,15 @@ def build_teacher_records(
         except (subprocess.TimeoutExpired, RuntimeError):
             return None
 
-    def solve(state: StateStats) -> SearchTarget:
-        key = (state.sequence, state.step_index)
-        cached = memo.get(key)
-        if cached is not None:
-            return cached
-
-        q_values = np.zeros(len(actions), dtype=np.float32)
-        action_mask = np.zeros(len(actions), dtype=np.float32)
-        best_action = terminal_indices[0]
-        best_final: FinalStats | None = None
-        best_return = -1e9
-
-        nonterminal_indices = [idx for idx, action in enumerate(actions) if not action.terminal]
-        if state.step_index + 1 < max_steps:
-            candidate_nonterminal = _rank_nonterminal_actions(env, state, nonterminal_indices, branch_topk)
-        else:
-            candidate_nonterminal = nonterminal_indices
-        candidate_indices = list(teacher_terminal_indices) + candidate_nonterminal
-
-        for action_index in candidate_indices:
-            action = actions[action_index]
-            action_mask[action_index] = 1.0
-
-            if action.terminal:
-                final_stats = safe_final(
-                    state.sequence,
-                    action.final_map_command or "map_fpga -P 10 -C 6 -G 1 -L 1",
-                )
-                if final_stats is None:
-                    continue
-                action_return = _normalized_return(initial_final, final_stats)
-            else:
-                next_state = safe_next(state, action_index)
-                if next_state is None:
-                    continue
-                if next_state.step_index >= max_steps:
-                    try:
-                        _best_terminal_idx, final_stats = _best_terminal_for_state(env, next_state, teacher_terminal_indices)
-                    except (subprocess.TimeoutExpired, RuntimeError):
-                        continue
-                    action_return = _normalized_return(initial_final, final_stats)
-                else:
-                    try:
-                        child_target = solve(next_state)
-                    except RuntimeError:
-                        continue
-                    final_stats = child_target.best_final
-                    action_return = child_target.best_return
-
-            q_values[action_index] = float(action_return)
-            if action_return > best_return:
-                best_return = float(action_return)
-                best_action = action_index
-                best_final = final_stats
-
-        if best_final is None:
-            fallback_final = safe_final(state.sequence, "map_fpga -P 10 -C 6 -G 1 -L 1")
-            if fallback_final is None:
-                raise RuntimeError("teacher search failed to produce any final state")
-            fallback_action = next(
-                (
-                    idx
-                    for idx in teacher_terminal_indices
-                    if (actions[idx].final_map_command or "map_fpga -P 10 -C 6 -G 1 -L 1") == "map_fpga -P 10 -C 6 -G 1 -L 1"
-                ),
-                teacher_terminal_indices[0],
-            )
-            best_action = fallback_action
-            best_final = fallback_final
-            best_return = _normalized_return(initial_final, fallback_final)
-            q_values[fallback_action] = float(best_return)
-            action_mask[fallback_action] = 1.0
-
+    def finalize_state(
+        state: StateStats,
+        key: tuple[tuple[str, ...], int],
+        best_action: int,
+        best_return: float,
+        best_final: FinalStats,
+        q_values: np.ndarray,
+        action_mask: np.ndarray,
+    ) -> SearchTarget:
         record = TeacherRecord(
             obs=np.array(env.observe(state), copy=True),
             best_action=best_action,
@@ -247,9 +230,114 @@ def build_teacher_records(
             action_mask=action_mask,
         )
         memo[key] = target
+        return target
+
+    def fallback_target(
+        state: StateStats,
+        key: tuple[tuple[str, ...], int],
+        q_values: np.ndarray,
+        action_mask: np.ndarray,
+    ) -> SearchTarget:
+        fallback_indices = [fast_terminal_index, *teacher_terminal_indices]
+        tried: set[int] = set()
+        for idx in fallback_indices:
+            if idx in tried:
+                continue
+            tried.add(idx)
+            final_stats = safe_final(state.sequence, actions[idx].final_map_command or "map_fpga -P 10 -C 6 -G 1 -L 1")
+            if final_stats is None:
+                continue
+            best_return = _normalized_return(initial_final, final_stats)
+            q_values[idx] = float(best_return)
+            action_mask[idx] = 1.0
+            return finalize_state(state, key, idx, best_return, final_stats, q_values, action_mask)
+        raise RuntimeError("teacher search failed to produce any final state")
+
+    def select_terminal_indices(state: StateStats) -> list[int]:
+        limit = _terminal_limit(state.step_index, terminal_topk, deep_terminal_topk)
+        if state.step_index <= 0:
+            return teacher_terminal_indices[:limit]
+        chosen = [fast_terminal_index]
+        for idx in teacher_terminal_indices:
+            if idx == fast_terminal_index:
+                continue
+            chosen.append(idx)
+            if len(chosen) >= limit:
+                break
+        return chosen[:limit]
+
+    def solve(state: StateStats) -> SearchTarget:
+        key = (state.sequence, state.step_index)
+        cached = memo.get(key)
+        if cached is not None:
+            return cached
+
         if progress_callback is not None:
             progress_callback(1)
-        return target
+
+        q_values = np.zeros(len(actions), dtype=np.float32)
+        action_mask = np.zeros(len(actions), dtype=np.float32)
+        best_action = terminal_indices[0]
+        best_final: FinalStats | None = None
+        best_return = -1e9
+        if deadline is not None and time.monotonic() >= deadline:
+            return fallback_target(state, key, q_values, action_mask)
+
+        nonterminal_indices = [idx for idx, action in enumerate(actions) if not action.terminal]
+        state_terminal_indices = select_terminal_indices(state)
+        if state.step_index + 1 < max_steps:
+            candidate_nonterminal = _rank_nonterminal_actions(
+                env,
+                state,
+                nonterminal_indices,
+                _branch_limit(state.step_index, branch_topk, deep_branch_topk, tail_branch_topk),
+            )
+        else:
+            candidate_nonterminal = nonterminal_indices
+        candidate_indices = list(state_terminal_indices) + candidate_nonterminal
+
+        for action_index in candidate_indices:
+            if deadline is not None and time.monotonic() >= deadline and best_final is not None:
+                break
+            action = actions[action_index]
+            action_mask[action_index] = 1.0
+
+            if action.terminal:
+                final_stats = safe_final(
+                    state.sequence,
+                    action.final_map_command or "map_fpga -P 10 -C 6 -G 1 -L 1",
+                )
+                if final_stats is None:
+                    continue
+                action_return = _normalized_return(initial_final, final_stats)
+            else:
+                next_state = safe_next(state, action_index)
+                if next_state is None:
+                    continue
+                if next_state.step_index >= max_steps:
+                    try:
+                        _best_terminal_idx, final_stats = _best_terminal_for_state(env, next_state, state_terminal_indices)
+                    except (subprocess.TimeoutExpired, RuntimeError):
+                        continue
+                    action_return = _normalized_return(initial_final, final_stats)
+                else:
+                    try:
+                        child_target = solve(next_state)
+                    except RuntimeError:
+                        continue
+                    final_stats = child_target.best_final
+                    action_return = child_target.best_return
+
+            q_values[action_index] = float(action_return)
+            if action_return > best_return:
+                best_return = float(action_return)
+                best_action = action_index
+                best_final = final_stats
+
+        if best_final is None:
+            return fallback_target(state, key, q_values, action_mask)
+
+        return finalize_state(state, key, best_action, best_return, best_final, q_values, action_mask)
 
     solve(initial_state)
     ordered_keys = sorted(records.keys(), key=lambda item: (item[1], item[0]))

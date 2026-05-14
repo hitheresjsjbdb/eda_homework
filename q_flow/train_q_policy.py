@@ -38,8 +38,14 @@ def _cache_key(
     case_name: str,
     max_steps: int,
     branch_topk: int,
+    deep_branch_topk: int,
+    tail_branch_topk: int,
     terminal_topk: int,
+    deep_terminal_topk: int,
     timeout_sec: float,
+    teacher_budget_sec: float,
+    teacher_aig_timeout_sec: float,
+    teacher_final_timeout_sec: float,
     action_names: list[str],
 ) -> str:
     payload = json.dumps(
@@ -48,8 +54,14 @@ def _cache_key(
             "case_name": case_name,
             "max_steps": max_steps,
             "branch_topk": branch_topk,
+            "deep_branch_topk": deep_branch_topk,
+            "tail_branch_topk": tail_branch_topk,
             "terminal_topk": terminal_topk,
+            "deep_terminal_topk": deep_terminal_topk,
             "timeout_sec": timeout_sec,
+            "teacher_budget_sec": teacher_budget_sec,
+            "teacher_aig_timeout_sec": teacher_aig_timeout_sec,
+            "teacher_final_timeout_sec": teacher_final_timeout_sec,
             "action_names": action_names,
         },
         sort_keys=True,
@@ -153,7 +165,12 @@ def _collect_case_records(task: dict[str, object]) -> dict[str, object]:
                 except Exception:
                     pass
             _emit_event(event_queue, ("case_done", case_name, len(cached), f"cache-{cache_mode}"))
-            return {"case_name": case_name, "records": cached, "source": f"cache-{cache_mode}"}
+            return {
+                "case_name": case_name,
+                "cache_file": str(cache_file if cache_mode == "legacy" else cache_path),
+                "record_count": len(cached),
+                "source": f"cache-{cache_mode}",
+            }
 
     actions = default_actions()
     env = AIGEnv(
@@ -161,7 +178,8 @@ def _collect_case_records(task: dict[str, object]) -> dict[str, object]:
         imap_bin=Path(str(task["imap_bin"])),
         actions=actions,
         max_steps=int(task["max_steps"]),
-        timeout_sec=float(task["timeout_sec"]),
+        timeout_sec=float(task["teacher_aig_timeout_sec"]),
+        final_timeout_sec=float(task["teacher_final_timeout_sec"]),
     )
     _emit_event(event_queue, ("case_start", case_name, int(task["estimated_states"])))
 
@@ -174,15 +192,24 @@ def _collect_case_records(task: dict[str, object]) -> dict[str, object]:
             actions=actions,
             max_steps=int(task["max_steps"]),
             branch_topk=int(task["branch_topk"]),
+            deep_branch_topk=int(task["deep_branch_topk"]),
+            tail_branch_topk=int(task["tail_branch_topk"]),
             terminal_topk=int(task["terminal_topk"]),
+            deep_terminal_topk=int(task["deep_terminal_topk"]),
+            teacher_budget_sec=float(task["teacher_budget_sec"]),
             progress_callback=on_progress,
         )
         _save_cached_records(cache_file, records)
         _emit_event(event_queue, ("case_done", case_name, len(records), "build"))
-        return {"case_name": case_name, "records": records, "source": "build"}
+        return {
+            "case_name": case_name,
+            "cache_file": str(cache_file),
+            "record_count": len(records),
+            "source": "build",
+        }
     except Exception as exc:
         _emit_event(event_queue, ("case_error", case_name, str(exc)))
-        return {"case_name": case_name, "records": [], "source": "error", "error": str(exc)}
+        return {"case_name": case_name, "record_count": 0, "source": "error", "error": str(exc)}
 
 
 def _progress_monitor(event_queue, total_cases: int) -> None:
@@ -271,7 +298,13 @@ def main() -> int:
     parser.add_argument("--weight-decay", type=float, default=1e-5)
     parser.add_argument("--timeout-sec", type=float, default=60.0)
     parser.add_argument("--branch-topk", type=int, default=4)
+    parser.add_argument("--deep-branch-topk", type=int, default=2)
+    parser.add_argument("--tail-branch-topk", type=int, default=1)
     parser.add_argument("--terminal-topk", type=int, default=2)
+    parser.add_argument("--deep-terminal-topk", type=int, default=1)
+    parser.add_argument("--teacher-budget-sec", type=float, default=120.0)
+    parser.add_argument("--teacher-aig-timeout-sec", type=float, default=20.0)
+    parser.add_argument("--teacher-final-timeout-sec", type=float, default=12.0)
     parser.add_argument("--num-workers", type=int, default=8)
     parser.add_argument("--device", type=str, default="auto")
     parser.add_argument("--seed", type=int, default=12345)
@@ -310,8 +343,14 @@ def main() -> int:
             case_name,
             args.max_steps,
             args.branch_topk,
+            args.deep_branch_topk,
+            args.tail_branch_topk,
             args.terminal_topk,
+            args.deep_terminal_topk,
             args.timeout_sec,
+            args.teacher_budget_sec,
+            args.teacher_aig_timeout_sec,
+            args.teacher_final_timeout_sec,
             action_names,
         )
         cache_file = args.cache_dir / f"{case_name}_{cache_key}.npz"
@@ -344,8 +383,19 @@ def main() -> int:
                 "max_steps": args.max_steps,
                 "timeout_sec": args.timeout_sec,
                 "branch_topk": args.branch_topk,
+                "deep_branch_topk": args.deep_branch_topk,
+                "tail_branch_topk": args.tail_branch_topk,
                 "terminal_topk": args.terminal_topk,
-                "estimated_states": estimate_teacher_states(args.max_steps, args.branch_topk),
+                "deep_terminal_topk": args.deep_terminal_topk,
+                "teacher_budget_sec": args.teacher_budget_sec,
+                "teacher_aig_timeout_sec": min(args.timeout_sec, args.teacher_aig_timeout_sec),
+                "teacher_final_timeout_sec": min(args.timeout_sec, args.teacher_final_timeout_sec),
+                "estimated_states": estimate_teacher_states(
+                    args.max_steps,
+                    args.branch_topk,
+                    args.deep_branch_topk,
+                    args.tail_branch_topk,
+                ),
             }
         )
 
@@ -359,27 +409,49 @@ def main() -> int:
             task["event_queue"] = event_queue
         monitor = threading.Thread(target=_progress_monitor, args=(event_queue, len(tasks)), daemon=True)
         monitor.start()
+        pool = ctx.Pool(processes=max(1, args.num_workers))
         try:
-            with ctx.Pool(processes=max(1, args.num_workers)) as pool:
-                iterator = pool.imap_unordered(_collect_case_records, tasks)
-                for result in iterator:
-                    records = result.get("records", [])
-                    if result.get("source") == "error":
-                        case_errors.append(
-                            {
-                                "case_name": str(result["case_name"]),
-                                "error": str(result.get("error", "unknown error")),
-                            }
-                        )
-                        continue
-                    if not records:
-                        continue
-                    case_name = str(result["case_name"])
-                    source = str(result["source"])
-                    dataset.extend(records)
-                    case_stats.append({"case_name": case_name, "records": float(len(records)), "source": source})
+            iterator = pool.imap_unordered(_collect_case_records, tasks, chunksize=1)
+            for result in iterator:
+                if result.get("source") == "error":
+                    case_errors.append(
+                        {
+                            "case_name": str(result["case_name"]),
+                            "error": str(result.get("error", "unknown error")),
+                        }
+                    )
+                    continue
+
+                case_name = str(result["case_name"])
+                source = str(result["source"])
+                cache_file = Path(str(result["cache_file"]))
+                try:
+                    records = _load_cached_records(cache_file)
+                except Exception as exc:
+                    case_errors.append({"case_name": case_name, "error": f"cache reload failed: {exc}"})
+                    continue
+                if not records:
+                    case_errors.append({"case_name": case_name, "error": "cache reload returned no records"})
+                    continue
+                dataset.extend(records)
+                case_stats.append({"case_name": case_name, "records": float(len(records)), "source": source})
+        except KeyboardInterrupt:
+            print("teacher collection interrupted, terminating workers...")
+            pool.terminate()
+            pool.join()
+            raise
+        except Exception:
+            pool.terminate()
+            pool.join()
+            raise
+        else:
+            pool.close()
+            pool.join()
         finally:
-            event_queue.put(("all_done",))
+            try:
+                event_queue.put(("all_done",))
+            except Exception:
+                pass
             monitor.join()
 
     if not dataset:
