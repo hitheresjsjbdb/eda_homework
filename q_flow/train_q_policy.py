@@ -26,7 +26,7 @@ from q_flow.inference import run_policy
 from q_flow.model import GreedyQNet
 from q_flow.teacher import TeacherRecord, build_teacher_records, estimate_teacher_states
 
-_CACHE_VERSION = 2
+_CACHE_VERSION = 3
 
 
 def minibatch_indices(size: int, batch_size: int, rng: random.Random) -> list[list[int]]:
@@ -47,6 +47,10 @@ def _cache_key(
     teacher_budget_sec: float,
     teacher_aig_timeout_sec: float,
     teacher_final_timeout_sec: float,
+    teacher_medium_area_threshold: int,
+    teacher_medium_depth_threshold: int,
+    teacher_hard_area_threshold: int,
+    teacher_hard_depth_threshold: int,
     action_names: list[str],
 ) -> str:
     payload = json.dumps(
@@ -63,6 +67,10 @@ def _cache_key(
             "teacher_budget_sec": teacher_budget_sec,
             "teacher_aig_timeout_sec": teacher_aig_timeout_sec,
             "teacher_final_timeout_sec": teacher_final_timeout_sec,
+            "teacher_medium_area_threshold": teacher_medium_area_threshold,
+            "teacher_medium_depth_threshold": teacher_medium_depth_threshold,
+            "teacher_hard_area_threshold": teacher_hard_area_threshold,
+            "teacher_hard_depth_threshold": teacher_hard_depth_threshold,
             "action_names": action_names,
         },
         sort_keys=True,
@@ -70,18 +78,38 @@ def _cache_key(
     return hashlib.sha1(payload.encode("utf-8")).hexdigest()[:16]
 
 
-def _load_cached_records(cache_file: Path) -> list[TeacherRecord] | None:
+def _load_cached_records(
+    cache_file: Path,
+    expected_action_dim: int | None = None,
+    expected_obs_dim: int | None = None,
+) -> list[TeacherRecord] | None:
     if not cache_file.is_file():
         return None
     data = np.load(cache_file, allow_pickle=False)
     count = int(data["count"][0])
     records: list[TeacherRecord] = []
     for idx in range(count):
+        obs = np.asarray(data[f"obs_{idx}"], dtype=np.float32)
+        q_values = np.asarray(data[f"q_values_{idx}"], dtype=np.float32)
+        action_mask = np.asarray(data[f"action_mask_{idx}"], dtype=np.float32)
+        if expected_obs_dim is not None:
+            if obs.shape[0] > expected_obs_dim:
+                return None
+            if obs.shape[0] < expected_obs_dim:
+                obs = np.pad(obs, (0, expected_obs_dim - obs.shape[0]), mode="constant", constant_values=0.0)
+        if expected_action_dim is not None:
+            if q_values.shape[0] > expected_action_dim:
+                return None
+            if q_values.shape[0] < expected_action_dim:
+                pad = expected_action_dim - q_values.shape[0]
+                q_values = np.pad(q_values, (0, pad), mode="constant", constant_values=0.0)
+                action_mask = np.pad(action_mask, (0, pad), mode="constant", constant_values=0.0)
         payload = {
-            "obs": data[f"obs_{idx}"],
+            "state_key": data[f"state_key_{idx}"][0] if f"state_key_{idx}" in data.files else "",
+            "obs": obs,
             "best_action": int(data[f"best_action_{idx}"][0]),
-            "q_values": data[f"q_values_{idx}"],
-            "action_mask": data[f"action_mask_{idx}"],
+            "q_values": q_values,
+            "action_mask": action_mask,
             "target_value": float(data[f"target_value_{idx}"][0]),
             "target_area": float(data[f"target_area_{idx}"][0]),
             "target_depth": float(data[f"target_depth_{idx}"][0]),
@@ -123,6 +151,7 @@ def _save_cached_records(cache_file: Path, records: list[TeacherRecord]) -> None
     arrays: dict[str, np.ndarray] = {"count": np.asarray([len(records)], dtype=np.int32)}
     for idx, record in enumerate(records):
         payload = record.to_payload()
+        arrays[f"state_key_{idx}"] = np.asarray([payload["state_key"]], dtype=np.str_)
         arrays[f"obs_{idx}"] = np.asarray(payload["obs"], dtype=np.float32)
         arrays[f"best_action_{idx}"] = np.asarray([payload["best_action"]], dtype=np.int32)
         arrays[f"q_values_{idx}"] = np.asarray(payload["q_values"], dtype=np.float32)
@@ -139,6 +168,78 @@ def masked_q_loss(pred_q: torch.Tensor, target_q: torch.Tensor, action_mask: tor
     masked = per_item * action_mask
     denom = action_mask.sum().clamp_min(1.0)
     return masked.sum() / denom
+
+
+def _merge_teacher_records(records: list[TeacherRecord]) -> list[TeacherRecord]:
+    merged: dict[str, TeacherRecord] = {}
+    for record in records:
+        key = record.state_key
+        if key not in merged:
+            merged[key] = TeacherRecord(
+                state_key=record.state_key,
+                obs=np.array(record.obs, copy=True),
+                best_action=int(record.best_action),
+                q_values=np.array(record.q_values, copy=True),
+                action_mask=np.array(record.action_mask, copy=True),
+                target_value=float(record.target_value),
+                target_area=float(record.target_area),
+                target_depth=float(record.target_depth),
+            )
+            continue
+
+        current = merged[key]
+        update_mask = (record.action_mask > 0.0) & ((current.action_mask <= 0.0) | (record.q_values > current.q_values))
+        current.q_values[update_mask] = record.q_values[update_mask]
+        current.action_mask = np.maximum(current.action_mask, record.action_mask)
+
+        if record.target_value > current.target_value:
+            current.target_value = float(record.target_value)
+            current.target_area = float(record.target_area)
+            current.target_depth = float(record.target_depth)
+
+        masked_scores = np.where(current.action_mask > 0.0, current.q_values, -1e9)
+        current.best_action = int(np.argmax(masked_scores))
+    return sorted(merged.values(), key=lambda item: item.state_key)
+
+
+def _teacher_profiles(task: dict[str, object], initial_area: int, initial_depth: int) -> list[dict[str, object]]:
+    base = {
+        "branch_topk": int(task["branch_topk"]),
+        "deep_branch_topk": int(task["deep_branch_topk"]),
+        "tail_branch_topk": int(task["tail_branch_topk"]),
+        "terminal_topk": int(task["terminal_topk"]),
+        "deep_terminal_topk": int(task["deep_terminal_topk"]),
+        "teacher_budget_sec": float(task["teacher_budget_sec"]),
+        "proxy_mode": "balanced",
+    }
+    profiles = [base]
+
+    if initial_area >= int(task["teacher_medium_area_threshold"]) or initial_depth >= int(task["teacher_medium_depth_threshold"]):
+        profiles.append(
+            {
+                "branch_topk": max(2, min(base["branch_topk"], 3)),
+                "deep_branch_topk": 1,
+                "tail_branch_topk": 1,
+                "terminal_topk": max(2, base["terminal_topk"]),
+                "deep_terminal_topk": 1,
+                "teacher_budget_sec": max(20.0, 0.5 * base["teacher_budget_sec"]),
+                "proxy_mode": "area",
+            }
+        )
+
+    if initial_area >= int(task["teacher_hard_area_threshold"]) or initial_depth >= int(task["teacher_hard_depth_threshold"]):
+        profiles.append(
+            {
+                "branch_topk": max(base["branch_topk"], 4),
+                "deep_branch_topk": max(base["deep_branch_topk"], 2),
+                "tail_branch_topk": 1,
+                "terminal_topk": max(2, base["terminal_topk"]),
+                "deep_terminal_topk": 1,
+                "teacher_budget_sec": max(30.0, 0.75 * base["teacher_budget_sec"]),
+                "proxy_mode": "depth",
+            }
+        )
+    return profiles
 
 
 def evaluate_split(
@@ -220,9 +321,19 @@ def _collect_case_records(task: dict[str, object]) -> dict[str, object]:
     cache_dir = cache_file.parent
     cache_key = str(task["cache_key"])
     event_queue = task.get("event_queue")
+    expected_action_dim = int(task["expected_action_dim"])
+    expected_obs_dim = int(task["expected_obs_dim"])
     if not bool(task["rebuild_cache"]):
         cache_path, cache_mode = _find_cache_file(cache_dir, case_name, cache_key)
-        cached = _load_cached_records(cache_path) if cache_path is not None else None
+        cached = (
+            _load_cached_records(
+                cache_path,
+                expected_action_dim=expected_action_dim,
+                expected_obs_dim=expected_obs_dim,
+            )
+            if cache_path is not None
+            else None
+        )
         if cached is not None:
             if cache_mode == "legacy" and cache_path is not None and cache_path != cache_file:
                 try:
@@ -246,24 +357,41 @@ def _collect_case_records(task: dict[str, object]) -> dict[str, object]:
         timeout_sec=float(task["teacher_aig_timeout_sec"]),
         final_timeout_sec=float(task["teacher_final_timeout_sec"]),
     )
-    _emit_event(event_queue, ("case_start", case_name, int(task["estimated_states"])))
+    initial_aig = env.evaluate_aig(tuple())
+    profiles = _teacher_profiles(task, initial_aig.area, initial_aig.depth)
+    estimated_states = sum(
+        estimate_teacher_states(
+            int(task["max_steps"]),
+            int(profile["branch_topk"]),
+            int(profile["deep_branch_topk"]),
+            int(profile["tail_branch_topk"]),
+        )
+        for profile in profiles
+    )
+    _emit_event(event_queue, ("case_start", case_name, estimated_states))
 
     def on_progress(delta: int) -> None:
         _emit_event(event_queue, ("case_progress", case_name, delta))
 
     try:
-        records = build_teacher_records(
-            env=env,
-            actions=actions,
-            max_steps=int(task["max_steps"]),
-            branch_topk=int(task["branch_topk"]),
-            deep_branch_topk=int(task["deep_branch_topk"]),
-            tail_branch_topk=int(task["tail_branch_topk"]),
-            terminal_topk=int(task["terminal_topk"]),
-            deep_terminal_topk=int(task["deep_terminal_topk"]),
-            teacher_budget_sec=float(task["teacher_budget_sec"]),
-            progress_callback=on_progress,
-        )
+        collected: list[TeacherRecord] = []
+        for profile in profiles:
+            collected.extend(
+                build_teacher_records(
+                    env=env,
+                    actions=actions,
+                    max_steps=int(task["max_steps"]),
+                    branch_topk=int(profile["branch_topk"]),
+                    deep_branch_topk=int(profile["deep_branch_topk"]),
+                    tail_branch_topk=int(profile["tail_branch_topk"]),
+                    terminal_topk=int(profile["terminal_topk"]),
+                    deep_terminal_topk=int(profile["deep_terminal_topk"]),
+                    teacher_budget_sec=float(profile["teacher_budget_sec"]),
+                    proxy_mode=str(profile["proxy_mode"]),
+                    progress_callback=on_progress,
+                )
+            )
+        records = _merge_teacher_records(collected)
         _save_cached_records(cache_file, records)
         _emit_event(event_queue, ("case_done", case_name, len(records), "build"))
         return {
@@ -371,6 +499,10 @@ def main() -> int:
     parser.add_argument("--teacher-budget-sec", type=float, default=120.0)
     parser.add_argument("--teacher-aig-timeout-sec", type=float, default=20.0)
     parser.add_argument("--teacher-final-timeout-sec", type=float, default=12.0)
+    parser.add_argument("--teacher-medium-area-threshold", type=int, default=800)
+    parser.add_argument("--teacher-medium-depth-threshold", type=int, default=20)
+    parser.add_argument("--teacher-hard-area-threshold", type=int, default=2500)
+    parser.add_argument("--teacher-hard-depth-threshold", type=int, default=60)
     parser.add_argument("--num-workers", type=int, default=8)
     parser.add_argument("--eval-every", type=int, default=0)
     parser.add_argument("--eval-timeout-sec", type=float, default=60.0)
@@ -422,13 +554,25 @@ def main() -> int:
             args.teacher_budget_sec,
             args.teacher_aig_timeout_sec,
             args.teacher_final_timeout_sec,
+            args.teacher_medium_area_threshold,
+            args.teacher_medium_depth_threshold,
+            args.teacher_hard_area_threshold,
+            args.teacher_hard_depth_threshold,
             action_names,
         )
         cache_file = args.cache_dir / f"{case_name}_{cache_key}.npz"
         if not args.rebuild_cache:
             try:
                 cache_path, cache_mode = _find_cache_file(args.cache_dir, case_name, cache_key)
-                cached = _load_cached_records(cache_path) if cache_path is not None else None
+                cached = (
+                    _load_cached_records(
+                        cache_path,
+                        expected_action_dim=action_dim,
+                        expected_obs_dim=obs_dim,
+                    )
+                    if cache_path is not None
+                    else None
+                )
             except Exception as exc:
                 case_errors.append({"case_name": case_name, "error": f"bad cache: {exc}"})
                 cached = None
@@ -448,6 +592,8 @@ def main() -> int:
                 "case_name": case_name,
                 "cache_file": str(cache_file),
                 "cache_key": cache_key,
+                "expected_action_dim": action_dim,
+                "expected_obs_dim": obs_dim,
                 "rebuild_cache": args.rebuild_cache,
                 "input_aig": str(args.case_root / case_name / f"{case_name}.aig"),
                 "imap_bin": str(args.imap_bin),
@@ -461,6 +607,10 @@ def main() -> int:
                 "teacher_budget_sec": args.teacher_budget_sec,
                 "teacher_aig_timeout_sec": min(args.timeout_sec, args.teacher_aig_timeout_sec),
                 "teacher_final_timeout_sec": min(args.timeout_sec, args.teacher_final_timeout_sec),
+                "teacher_medium_area_threshold": args.teacher_medium_area_threshold,
+                "teacher_medium_depth_threshold": args.teacher_medium_depth_threshold,
+                "teacher_hard_area_threshold": args.teacher_hard_area_threshold,
+                "teacher_hard_depth_threshold": args.teacher_hard_depth_threshold,
                 "estimated_states": estimate_teacher_states(
                     args.max_steps,
                     args.branch_topk,
@@ -497,7 +647,11 @@ def main() -> int:
                 source = str(result["source"])
                 cache_file = Path(str(result["cache_file"]))
                 try:
-                    records = _load_cached_records(cache_file)
+                    records = _load_cached_records(
+                        cache_file,
+                        expected_action_dim=action_dim,
+                        expected_obs_dim=obs_dim,
+                    )
                 except Exception as exc:
                     case_errors.append({"case_name": case_name, "error": f"cache reload failed: {exc}"})
                     continue

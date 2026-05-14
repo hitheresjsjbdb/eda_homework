@@ -13,6 +13,7 @@ from .env import AIGEnv, FinalStats, NetStats, StateStats
 
 @dataclass
 class TeacherRecord:
+    state_key: str
     obs: np.ndarray
     best_action: int
     q_values: np.ndarray
@@ -23,6 +24,7 @@ class TeacherRecord:
 
     def to_payload(self) -> dict[str, np.ndarray | float | int]:
         return {
+            "state_key": self.state_key,
             "obs": np.asarray(self.obs, dtype=np.float32),
             "best_action": int(self.best_action),
             "q_values": np.asarray(self.q_values, dtype=np.float32),
@@ -35,6 +37,7 @@ class TeacherRecord:
     @classmethod
     def from_payload(cls, payload: dict[str, np.ndarray | float | int]) -> "TeacherRecord":
         return cls(
+            state_key=str(payload.get("state_key", "")),
             obs=np.asarray(payload["obs"], dtype=np.float32),
             best_action=int(payload["best_action"]),
             q_values=np.asarray(payload["q_values"], dtype=np.float32),
@@ -77,7 +80,22 @@ def _normalized_return(initial_final: FinalStats, final_stats: FinalStats) -> fl
     return (initial_final.cost - final_stats.cost) / max(1e-6, initial_final.cost)
 
 
-def _proxy_cost(stats: NetStats) -> float:
+def _proxy_cost(stats: NetStats, proxy_mode: str) -> float:
+    if proxy_mode == "area":
+        return (
+            0.22 * np.log1p(float(stats.depth))
+            + 0.58 * np.log1p(float(stats.area))
+            + 0.08 * float(stats.high_fanout_ratio)
+            + 0.07 * float(stats.inv_ratio)
+            + 0.05 * float(stats.po_inv_ratio)
+        )
+    if proxy_mode == "depth":
+        return (
+            0.68 * np.log1p(float(stats.depth))
+            + 0.22 * np.log1p(float(stats.area))
+            + 0.06 * float(stats.high_level_ratio)
+            + 0.04 * float(stats.high_fanout_ratio)
+        )
     return (
         0.55 * np.log1p(float(stats.depth))
         + 0.35 * np.log1p(float(stats.area))
@@ -91,19 +109,20 @@ def _rank_nonterminal_actions(
     state: StateStats,
     action_indices: list[int],
     branch_topk: int,
+    proxy_mode: str,
 ) -> list[int]:
     if len(action_indices) <= branch_topk:
         return action_indices
 
     ranked: list[tuple[float, int]] = []
-    state_proxy = _proxy_cost(state.aig)
+    state_proxy = _proxy_cost(state.aig, proxy_mode)
     for action_index in action_indices:
         try:
             next_state = env.next_state(state, action_index)
         except Exception:
             continue
         repeat_penalty = 0.03 * float(state.action_counts[action_index])
-        score = state_proxy - _proxy_cost(next_state.aig) - repeat_penalty
+        score = state_proxy - _proxy_cost(next_state.aig, proxy_mode) - repeat_penalty
         ranked.append((score, action_index))
     ranked.sort(reverse=True)
     return [action_index for _score, action_index in ranked[:branch_topk]]
@@ -153,6 +172,10 @@ def _terminal_limit(
     return max(1, min(terminal_topk, deep_terminal_topk))
 
 
+def _encode_state_key(sequence: tuple[str, ...], step_index: int) -> str:
+    return f"{step_index}|{' ; '.join(sequence)}"
+
+
 def build_teacher_records(
     env: AIGEnv,
     actions: list[FlowAction],
@@ -163,6 +186,7 @@ def build_teacher_records(
     terminal_topk: int = 2,
     deep_terminal_topk: int = 1,
     teacher_budget_sec: float | None = None,
+    proxy_mode: str = "balanced",
     progress_callback: Callable[[int], None] | None = None,
 ) -> list[TeacherRecord]:
     obs0 = env.reset()
@@ -213,6 +237,7 @@ def build_teacher_records(
         action_mask: np.ndarray,
     ) -> SearchTarget:
         record = TeacherRecord(
+            state_key=_encode_state_key(key[0], key[1]),
             obs=np.array(env.observe(state), copy=True),
             best_action=best_action,
             q_values=q_values,
@@ -291,6 +316,7 @@ def build_teacher_records(
                 state,
                 nonterminal_indices,
                 _branch_limit(state.step_index, branch_topk, deep_branch_topk, tail_branch_topk),
+                proxy_mode,
             )
         else:
             candidate_nonterminal = nonterminal_indices

@@ -1,0 +1,27 @@
+{
+  "history": [
+    {
+      "epoch": 1,
+      "records": 7,
+      "loss": 1.9761427640914917,
+      "ce_loss": 1.533064842224121,
+      "q_loss": 0.15017423033714294,
+      "value_loss": 0.10350161790847778,
+      "area_loss": 3.5325875282287598,
+      "depth_loss": 1.807974934577942
+    }
+  ],
+  "cases": [
+    {
+      "case_name": "b03_comb",
+      "records": 4.0,
+      "source": "cache-exact"
+    },
+    {
+      "case_name": "s526_comb",
+      "records": 3.0,
+      "source": "cache-exact"
+    }
+  ],
+  "errors": []
+}
