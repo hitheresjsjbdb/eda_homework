@@ -7,6 +7,7 @@ import json
 import multiprocessing as mp
 import queue
 import random
+import shutil
 import sys
 import threading
 from pathlib import Path
@@ -76,6 +77,35 @@ def _load_cached_records(cache_file: Path) -> list[TeacherRecord] | None:
     return records
 
 
+def _is_hex_hash(text: str) -> bool:
+    if len(text) != 16:
+        return False
+    return all(ch in "0123456789abcdef" for ch in text)
+
+
+def _find_cache_file(cache_dir: Path, case_name: str, cache_key: str) -> tuple[Path | None, str]:
+    exact = cache_dir / f"{case_name}_{cache_key}.npz"
+    if exact.is_file():
+        return exact, "exact"
+
+    legacy_candidates: list[Path] = []
+    for candidate in cache_dir.glob(f"{case_name}_*.npz"):
+        stem = candidate.stem
+        if "_" not in stem:
+            continue
+        prefix, suffix = stem.rsplit("_", 1)
+        if prefix != case_name:
+            continue
+        if not _is_hex_hash(suffix):
+            continue
+        legacy_candidates.append(candidate)
+
+    if not legacy_candidates:
+        return None, "missing"
+    legacy_candidates.sort(key=lambda item: item.stat().st_mtime, reverse=True)
+    return legacy_candidates[0], "legacy"
+
+
 def _save_cached_records(cache_file: Path, records: list[TeacherRecord]) -> None:
     arrays: dict[str, np.ndarray] = {"count": np.asarray([len(records)], dtype=np.int32)}
     for idx, record in enumerate(records):
@@ -110,12 +140,20 @@ def _emit_event(event_queue, event: tuple[object, ...]) -> None:
 def _collect_case_records(task: dict[str, object]) -> dict[str, object]:
     case_name = str(task["case_name"])
     cache_file = Path(str(task["cache_file"]))
+    cache_dir = cache_file.parent
+    cache_key = str(task["cache_key"])
     event_queue = task.get("event_queue")
     if not bool(task["rebuild_cache"]):
-        cached = _load_cached_records(cache_file)
+        cache_path, cache_mode = _find_cache_file(cache_dir, case_name, cache_key)
+        cached = _load_cached_records(cache_path) if cache_path is not None else None
         if cached is not None:
-            _emit_event(event_queue, ("case_done", case_name, len(cached), "cache"))
-            return {"case_name": case_name, "records": cached, "source": "cache"}
+            if cache_mode == "legacy" and cache_path is not None and cache_path != cache_file:
+                try:
+                    shutil.copy2(cache_path, cache_file)
+                except Exception:
+                    pass
+            _emit_event(event_queue, ("case_done", case_name, len(cached), f"cache-{cache_mode}"))
+            return {"case_name": case_name, "records": cached, "source": f"cache-{cache_mode}"}
 
     actions = default_actions()
     env = AIGEnv(
@@ -279,13 +317,19 @@ def main() -> int:
         cache_file = args.cache_dir / f"{case_name}_{cache_key}.npz"
         if not args.rebuild_cache:
             try:
-                cached = _load_cached_records(cache_file)
+                cache_path, cache_mode = _find_cache_file(args.cache_dir, case_name, cache_key)
+                cached = _load_cached_records(cache_path) if cache_path is not None else None
             except Exception as exc:
                 case_errors.append({"case_name": case_name, "error": f"bad cache: {exc}"})
                 cached = None
             if cached is not None:
+                if cache_mode == "legacy" and cache_path is not None and cache_path != cache_file:
+                    try:
+                        shutil.copy2(cache_path, cache_file)
+                    except Exception:
+                        pass
                 dataset.extend(cached)
-                case_stats.append({"case_name": case_name, "records": float(len(cached)), "source": "cache"})
+                case_stats.append({"case_name": case_name, "records": float(len(cached)), "source": f"cache-{cache_mode}"})
                 cache_hits += 1
                 continue
         cache_misses += 1
@@ -293,6 +337,7 @@ def main() -> int:
             {
                 "case_name": case_name,
                 "cache_file": str(cache_file),
+                "cache_key": cache_key,
                 "rebuild_cache": args.rebuild_cache,
                 "input_aig": str(args.case_root / case_name / f"{case_name}.aig"),
                 "imap_bin": str(args.imap_bin),
